@@ -8,8 +8,8 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::ipc::Channel;
 
-use super::gamepad::PadList;
-use super::{build_device_list, gamepad, midi, DeviceInfo, Registry, ScanInputs};
+use super::gamepad::{PadHandle, PadList};
+use super::{build_device_list, midi, DeviceInfo, Registry, ScanInputs};
 use crate::hid;
 use crate::platform::Platform;
 
@@ -57,10 +57,9 @@ pub struct Hub {
 }
 
 impl Hub {
-    pub fn start(platform: Arc<dyn Platform>) -> Arc<Hub> {
-        let nudge = Arc::new(Nudge::default());
-        let n2 = nudge.clone();
-        let pads = gamepad::spawn(move || n2.ping());
+    /// `nudge` is shared with the engine and the pad thread so any of them can ask for a rescan.
+    pub fn start(platform: Arc<dyn Platform>, nudge: Arc<Nudge>, pads: PadHandle) -> Arc<Hub> {
+        let pads = pads.list;
         let hub = Arc::new(Hub {
             platform,
             registry: Mutex::new(Registry::default()),

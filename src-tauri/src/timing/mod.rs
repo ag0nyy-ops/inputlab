@@ -5,6 +5,7 @@ pub mod dpi;
 pub mod keystats;
 pub mod poll;
 pub mod sensor;
+pub mod stick;
 
 use std::sync::OnceLock;
 use std::time::Instant;

@@ -1,7 +1,7 @@
 // inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 import { useState } from 'react';
 import { Eye } from '../components/Eye';
-import { MouseModelPicker } from '../components/ModelPicker';
+import { MouseModelPicker, PadModelPicker } from '../components/ModelPicker';
 import { Kbd } from '../components/Kbd';
 import { Stamp } from '../components/Stamp';
 import { backendLabel, kindLabel, vidpid } from '../lib/format';
@@ -116,6 +116,7 @@ export function DevicePanel() {
       </dl>
 
       {dev.viewer === 'mouse' && <MouseModelPicker dev={dev} />}
+      {dev.viewer === 'gamepad' && <PadModelPicker dev={dev} />}
 
       {blocked ? (
         <div className="banner banner--problem">

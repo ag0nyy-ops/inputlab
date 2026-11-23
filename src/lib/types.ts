@@ -84,6 +84,9 @@ export type Ev =
   | ({ t: 'dpi' } & DpiSnap)
   | ({ t: 'sensor' } & SensorSnap)
   | { t: 'clicks'; buttons: ButtonStat[] }
+  | { t: 'pad'; items: PadItem[] }
+  | { t: 'padInfo'; forceFeedback: boolean; power: string; battery: number | null; pollSource: string }
+  | { t: 'sticks'; left: StickSnap; right: StickSnap; rest: RestSnap }
   | { t: 'exit'; kind: ExitKind; progress: number }
   | { t: 'reserved'; label: string }
   | { t: 'ended'; reason: EndReason };
@@ -143,6 +146,40 @@ export interface ButtonStat {
   minGap: number | null;
 }
 
+export interface PadItem {
+  name: string;
+  code: string;
+  value: number;
+  axis: boolean;
+}
+
+export interface StickSnap {
+  x: number;
+  y: number;
+  active: boolean;
+  circularity: number | null;
+  coverage: number;
+  maxRange: number;
+  deadzone: number | null;
+  bins: number[];
+  path: [number, number][];
+}
+
+export interface RestEntry {
+  name: string;
+  meanX: number;
+  meanY: number;
+  offset: number;
+  noise: number;
+  drift: boolean;
+}
+
+export interface RestSnap {
+  running: boolean;
+  secsLeft: number;
+  entries: RestEntry[];
+}
+
 export type SessionCommand =
   | { type: 'resetKeys' }
   | { type: 'dpiStart'; distanceIn: number }
@@ -151,7 +188,12 @@ export type SessionCommand =
   | { type: 'sensorStart' }
   | { type: 'sensorStop' }
   | { type: 'sensorReset' }
-  | { type: 'mouseReset' };
+  | { type: 'mouseReset' }
+  | { type: 'padCircleStart' }
+  | { type: 'padCircleStop' }
+  | { type: 'padCircleReset' }
+  | { type: 'padRestStart'; secs: number }
+  | { type: 'padRumble'; strong: number; weak: number; ms: number };
 
 export interface KeyLabels {
   layout_name: string;

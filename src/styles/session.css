@@ -74,3 +74,21 @@
   .mv__table td { padding: .45rem .6rem .45rem 0; border-bottom: 1px solid var(--line); }
   @media (max-width: 760px) { .mv { grid-template-columns: 1fr; } }
 }
+
+@layer components {
+  .gv { display: grid; grid-template-columns: minmax(260px, 520px) minmax(0, 1fr); gap: 1rem 2rem; align-items: start; }
+  .gv__pad { display: grid; gap: .5rem; justify-items: center; min-width: 0; }
+  .gv__panel { min-width: 0; display: grid; gap: 1rem; align-content: start; }
+  .gv__panel > .seg { justify-self: start; flex-wrap: wrap; }
+  .gv__body { display: grid; gap: .8rem; align-content: start; justify-items: start; }
+  .gv__body > .mv__table, .gv__body > .kv, .gv__body > p, .gv__body > div:not(.banner) { justify-self: stretch; }
+  .gv__plots { display: flex; gap: 1rem; flex-wrap: wrap; }
+  .gv__plots figure { display: grid; gap: .3rem; margin: 0; }
+  .gv__plots canvas { border: 1px solid var(--line-strong); }
+  .gv__row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  .gv__raw td { padding-block: .25rem; }
+  .gv__bar { width: 7rem; }
+  .gv__bar span { display: block; height: 6px; background: var(--fg); }
+  .range { width: min(22rem, 100%); accent-color: var(--fg); min-height: 28px; }
+  @media (max-width: 900px) { .gv { grid-template-columns: 1fr; } }
+}

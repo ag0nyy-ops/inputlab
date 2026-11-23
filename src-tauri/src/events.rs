@@ -7,6 +7,16 @@ use crate::capture::ExitKind;
 use crate::timing::dpi::DpiSnap;
 use crate::timing::poll::PollSnap;
 use crate::timing::sensor::{ButtonStat, SensorSnap};
+use crate::timing::stick::{RestSnap, StickSnap};
+
+/// one changed control on a pad. latest value wins within a frame.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct PadItem {
+    pub name: String,
+    pub code: String,
+    pub value: f32,
+    pub axis: bool,
+}
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -44,6 +54,10 @@ pub enum Ev {
     Dpi(DpiSnap),
     Sensor(SensorSnap),
     Clicks { buttons: Vec<ButtonStat> },
+    Pad { items: Vec<PadItem> },
+    /// static-ish facts about the pad: rumble support, battery, where the polling rate comes from
+    PadInfo { force_feedback: bool, power: String, battery: Option<u8>, poll_source: String },
+    Sticks { left: StickSnap, right: StickSnap, rest: RestSnap },
     /// progress of an exit hold (0..1). sent whenever it changes.
     Exit { kind: ExitKind, progress: f32 },
     /// a key combo the os ate before we could see it, noticed after the fact

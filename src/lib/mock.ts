@@ -119,7 +119,21 @@ export function mockBridge(): Bridge {
       const md = (e: MouseEvent) => mb(e, true), mu = (e: MouseEvent) => mb(e, false);
       const wh = (e: WheelEvent) => { if (mode === 'mouse') buf.push({ t: 'wheel', dx: -Math.sign(e.deltaX) * 120, dy: -Math.sign(e.deltaY) * 120 }); };
       addEventListener('mousemove', mm); addEventListener('mousedown', md); addEventListener('mouseup', mu); addEventListener('wheel', wh);
+      const sticksMsg = (): Ev => {
+        const cov = circBins.filter((b) => b > 0).length / 72;
+        const mk = (left: boolean) => ({ x: pv[left ? 'LeftStickX' : 'RightStickX'] ?? 0, y: pv[left ? 'LeftStickY' : 'RightStickY'] ?? 0, active: circ, circularity: left && cov > 0.9 ? Math.min(...circBins.filter((b) => b > 0)) / Math.max(...circBins) : null, coverage: left ? cov : 0, maxRange: left ? Math.max(0, ...circBins) : 0, deadzone: left && circPath.length ? 0.08 : null, bins: left ? [...circBins] : new Array(72).fill(0), path: left ? circPath.slice(-300) : [] });
+        const left = mk(true);
+        return { t: 'sticks', left, right: mk(false), rest: { running: restUntil > performance.now(), secsLeft: Math.max(0, (restUntil - performance.now()) / 1000), entries: restAcc.length ? [{ name: 'left stick', meanX: 0.09, meanY: 0.01, offset: 0.09, noise: 0.012, drift: true }, { name: 'right stick', meanX: 0.002, meanY: 0, offset: 0.004, noise: 0.008, drift: false }] : [] } };
+      };
+      if (device.viewer === 'gamepad') {
+        buf.push({ t: 'padInfo', forceFeedback: true, power: 'discharging', battery: 72, pollSource: 'hid reports' });
+        setInterval(() => { if (circ || restUntil) buf.push(sticksMsg()); }, 100);
+      }
       cmdHandler = (c) => {
+        if (c.type === 'padCircleStart') { circ = true; circBins.fill(0); circPath.length = 0; buf.push(sticksMsg()); }
+        if (c.type === 'padCircleStop') { circ = false; buf.push(sticksMsg()); }
+        if (c.type === 'padCircleReset') { circ = false; circBins.fill(0); circPath.length = 0; buf.push(sticksMsg()); }
+        if (c.type === 'padRestStart') { restUntil = performance.now() + c.secs * 1000; restAcc.push(1); buf.push(sticksMsg()); }
         if (c.type === 'dpiStart') { dpiState = 'counting'; dpiDist = c.distanceIn; sx = sy = path = 0; }
         if (c.type === 'dpiStop') dpiState = 'done';
         if (c.type === 'dpiReset') { dpiState = 'idle'; sx = sy = path = 0; }
@@ -128,8 +142,28 @@ export function mockBridge(): Bridge {
         if (c.type === 'sensorReset') { sensorOn = false; sPath.length = 0; angles.fill(0); }
         if (c.type === 'mouseReset') { reports = 0; graph.length = 0; clicks.forEach((x) => Object.assign(x, { clicks: 0, holdMin: null, holdAvg: null, holdMax: null, chatter: 0, minGap: null })); }
       };
-      const kd = (e: KeyboardEvent) => onKey(e, true);
-      const ku = (e: KeyboardEvent) => onKey(e, false);
+      // fake pad: keys stand in for the controller (wasd left stick, arrows right, ijkl face, q/e bumpers, z/c triggers)
+      const pv: Record<string, number> = {};
+      let circ = false, restUntil = 0;
+      const circBins = new Array(72).fill(0);
+      const circPath: [number, number][] = [];
+      const restAcc: number[] = [];
+      const padSet = (name: string, v: number, axis = false) => { pv[name] = v; buf.push({ t: 'pad', items: [{ name, code: `mock-${name}`, value: v, axis }] }); };
+      const stickKeys: Record<string, [string, number]> = { KeyA: ['LeftStickX', -1], KeyD: ['LeftStickX', 1], KeyW: ['LeftStickY', 1], KeyS: ['LeftStickY', -1], ArrowLeft: ['RightStickX', -1], ArrowRight: ['RightStickX', 1], ArrowUp: ['RightStickY', 1], ArrowDown: ['RightStickY', -1] };
+      const btnKeys: Record<string, string> = { KeyI: 'North', KeyJ: 'West', KeyK: 'South', KeyL: 'East', KeyQ: 'LeftTrigger', KeyE: 'RightTrigger', KeyZ: 'LeftTrigger2', KeyC: 'RightTrigger2', Enter: 'Start', Backspace: 'Select', KeyF: 'LeftThumb', KeyG: 'RightThumb', KeyT: 'DPadUp', KeyV: 'DPadDown', KeyB: 'DPadRight', KeyX: 'DPadLeft' };
+      const padKey = (e: KeyboardEvent, isDown: boolean) => {
+        if (e.repeat) return;
+        const st = stickKeys[e.code];
+        if (st) {
+          const cur = pv[st[0]] ?? 0;
+          padSet(st[0], isDown ? st[1] : cur === st[1] ? 0 : cur, true);
+          if (st[0].startsWith('Left')) { const x = pv.LeftStickX ?? 0, y = pv.LeftStickY ?? 0; const r = Math.hypot(x, y); if (circ && r > 0.02) { const a = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360; const b = Math.min(71, Math.floor(a / 5)); circBins[b] = Math.max(circBins[b], r); circPath.push([x, y]); } }
+        }
+        const bt = btnKeys[e.code];
+        if (bt) padSet(bt, isDown ? 1 : 0);
+      };
+      const kd = (e: KeyboardEvent) => { if (device.viewer === 'gamepad') padKey(e, true); onKey(e, true); };
+      const ku = (e: KeyboardEvent) => { if (device.viewer === 'gamepad') padKey(e, false); onKey(e, false); };
       addEventListener('keydown', kd);
       addEventListener('keyup', ku);
       const end = (reason: Ev & { t: 'ended' }) => {
@@ -159,6 +193,7 @@ export function mockBridge(): Bridge {
           }
           if (p >= 1) return end({ t: 'ended', reason: mode === 'mouse' ? 'esc-hold' : 'combo' });
         }
+        if (device.viewer === 'gamepad') buf.push({ t: 'poll', hz: 250, avgHz: 250, minHz: 244, maxHz: 256, intervalMinUs: 3900, intervalAvgUs: 4000, intervalMaxUs: 4100, jitterUs: 60, nominal: null, reports: 500, graph: Array.from({ length: 60 }, (_, i) => 248 + 4 * Math.sin(i / 3)) });
         if (mode === 'mouse') {
           if (mn) { buf.push({ t: 'mouse', dx: mdx, dy: mdy, n: mn }); mdx = mdy = mn = 0; }
           const moving = performance.now() - lastMove < 150;

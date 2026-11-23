@@ -29,8 +29,16 @@ pub fn run() {
     }));
 
     let platform = platform::current();
-    let hub = devices::hub::Hub::start(platform.clone());
-    let engine = engine::spawn(platform.clone(), hub.nudge.clone(), no_capture);
+    let nudge = std::sync::Arc::new(devices::hub::Nudge::default());
+    let (tx, rx) = engine::channel();
+    let pads = {
+        let (n, t) = (nudge.clone(), tx.clone());
+        devices::gamepad::spawn(move || n.ping(), move |m| {
+            let _ = t.send(EngineMsg::Pad(m));
+        })
+    };
+    let hub = devices::hub::Hub::start(platform.clone(), nudge.clone(), pads.clone());
+    let engine = engine::spawn(rx, tx, platform.clone(), nudge, no_capture, pads.cmd.clone());
 
     let app = tauri::Builder::default()
         .manage(AppState { hub, platform, engine, no_capture })

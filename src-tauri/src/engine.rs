@@ -14,15 +14,18 @@ use serde::Serialize;
 use tauri::ipc::Channel;
 
 use crate::capture::{exit_info, ExitInfo, ExitRule, ExitTracker, SessionSettings};
+use crate::devices::gamepad::{PadCmd, PadMsg};
 use crate::devices::hub::Nudge;
+use crate::hid::reader::{HidReader, HidReport};
 use crate::devices::{DeviceInfo, Viewer};
-use crate::events::{EndReason, Ev, Frame};
+use crate::events::{EndReason, Ev, Frame, PadItem};
 use crate::keys;
 use crate::platform::{CaptureMode, CaptureReport, CaptureSpec, Platform, RawEvent, RawSink, ReservedCombo, SrcId};
 use crate::timing::dpi::DpiTest;
 use crate::timing::keystats::KeyTracker;
 use crate::timing::poll::PollEstimator;
 use crate::timing::sensor::{ButtonTracker, SensorTest};
+use crate::timing::stick::{RestTest, StickTest};
 use crate::timing::{now_ns, ns_to_ms};
 
 const MS: u64 = 1_000_000;
@@ -86,6 +89,30 @@ impl MouseState {
     }
 }
 
+/// everything a controller session measures
+struct PadState {
+    pad: usize,
+    events: PollEstimator,
+    hid: PollEstimator,
+    hid_seen: bool,
+    left: StickTest,
+    right: StickTest,
+    rest: RestTest,
+    pending: Vec<PadItem>,
+    last_snap: u64,
+    last_reports: u64,
+    idle_sent: bool,
+}
+
+impl PadState {
+    fn new(pad: usize) -> Self {
+        Self { pad, events: PollEstimator::new(), hid: PollEstimator::new(), hid_seen: false, left: StickTest::new(), right: StickTest::new(), rest: RestTest::new(), pending: vec![], last_snap: 0, last_reports: 0, idle_sent: true }
+    }
+    fn poll(&self) -> &PollEstimator {
+        if self.hid_seen { &self.hid } else { &self.events }
+    }
+}
+
 pub struct Session {
     pub device: DeviceInfo,
     pub mode: CaptureMode,
@@ -97,6 +124,7 @@ pub struct Session {
     all_down: HashSet<&'static str>,
     keys: KeyTracker,
     mouse: Option<MouseState>,
+    pad: Option<PadState>,
     buf: Vec<Ev>,
     seq: u64,
 }
@@ -104,6 +132,7 @@ pub struct Session {
 impl Session {
     pub fn new(device: DeviceInfo, settings: &SessionSettings, now: u64) -> Self {
         let mode = mode_for(device.viewer);
+        let (device_viewer, device_pad_id) = (device.viewer, device.pad_id);
         Self {
             srcs: device.srcs.iter().copied().collect(),
             exit: ExitTracker::new(ExitRule::for_mode(mode, settings)),
@@ -115,6 +144,7 @@ impl Session {
             all_down: HashSet::new(),
             keys: KeyTracker::new(settings.chatter_ms),
             mouse: (mode == CaptureMode::Mouse).then(|| MouseState::new(settings.chatter_ms)),
+            pad: (device_viewer == Viewer::Gamepad).then(|| PadState::new(device_pad_id.unwrap_or(usize::MAX))),
             buf: Vec::new(),
             seq: 0,
         }
@@ -174,6 +204,56 @@ impl Session {
         }
     }
 
+    pub fn pad_id(&self) -> Option<usize> {
+        self.pad.as_ref().map(|p| p.pad)
+    }
+
+    pub fn on_pad(&mut self, msg: &PadMsg, now: u64) {
+        let Some(p) = self.pad.as_mut() else { return };
+        match msg {
+            PadMsg::Status(s) if s.pad == p.pad => {
+                self.buf.push(Ev::PadInfo { force_feedback: s.force_feedback, power: s.power.clone(), battery: s.battery, poll_source: if p.hid_seen { "hid reports".into() } else { "events".into() } });
+            }
+            PadMsg::Event(e) if e.pad == p.pad => {
+                p.events.push(e.ts);
+                // sticks
+                let stick = |t: &mut StickTest, rest: &mut RestTest, which: &str, x: Option<f32>, y: Option<f32>| {
+                    let (cx, cy) = t.pos();
+                    let (nx, ny) = (x.unwrap_or(cx), y.unwrap_or(cy));
+                    t.feed(nx, ny);
+                    rest.feed(which, true, nx, ny);
+                };
+                match e.name.as_str() {
+                    "LeftStickX" => stick(&mut p.left, &mut p.rest, "left stick", Some(e.value), None),
+                    "LeftStickY" => stick(&mut p.left, &mut p.rest, "left stick", None, Some(e.value)),
+                    "RightStickX" => stick(&mut p.right, &mut p.rest, "right stick", Some(e.value), None),
+                    "RightStickY" => stick(&mut p.right, &mut p.rest, "right stick", None, Some(e.value)),
+                    "LeftTrigger2" | "LeftZ" => p.rest.feed("left trigger", false, e.value, 0.0),
+                    "RightTrigger2" | "RightZ" => p.rest.feed("right trigger", false, e.value, 0.0),
+                    _ => {}
+                }
+                let item = PadItem { name: e.name.clone(), code: e.code.clone(), value: e.value, axis: e.axis };
+                match p.pending.iter_mut().find(|i| i.name == item.name && i.code == item.code) {
+                    Some(old) => *old = item,
+                    None => p.pending.push(item),
+                }
+                let _ = now;
+            }
+            _ => {}
+        }
+    }
+
+    pub fn on_hid(&mut self, r: &HidReport) {
+        if let Some(p) = self.pad.as_mut() {
+            if !p.hid_seen {
+                p.hid_seen = true;
+                p.last_reports = 0; // switch the poll source cleanly
+                p.idle_sent = false;
+            }
+            p.hid.push(r.ts);
+        }
+    }
+
     /// window lost the foreground. returns the end reason unless it is inside the arming grace.
     pub fn on_focus_lost(&mut self, now: u64) -> Option<EndReason> {
         if now.saturating_sub(self.started) < FOCUS_GRACE {
@@ -201,6 +281,17 @@ impl Session {
             SessionCommand::ResetKeys => self.reset_keys(),
             _ => {}
         }
+        if let Some(p) = self.pad.as_mut() {
+            match cmd {
+                SessionCommand::PadCircleStart => { p.left.start(); p.right.start(); }
+                SessionCommand::PadCircleStop => { p.left.stop(); p.right.stop(); }
+                SessionCommand::PadCircleReset => { p.left.reset(); p.right.reset(); }
+                SessionCommand::PadRestStart { secs } => p.rest.start(now, secs),
+                _ => {}
+            }
+            self.buf.push(Ev::Sticks { left: p.left.snapshot(), right: p.right.snapshot(), rest: p.rest.snapshot(now) });
+            return;
+        }
         let Some(m) = self.mouse.as_mut() else { return };
         match cmd {
             SessionCommand::DpiStart { distance_in } => m.dpi.start(distance_in),
@@ -215,7 +306,7 @@ impl Session {
                 m.last_reports = 0;
                 m.idle_sent = false;
             }
-            SessionCommand::ResetKeys => {}
+            _ => {}
         }
         // answer immediately so the ui never shows stale numbers after a command
         self.buf.push(Ev::Dpi(m.dpi.snapshot()));
@@ -268,6 +359,22 @@ impl Session {
                 }
             }
         }
+        if let Some(p) = self.pad.as_mut() {
+            let finished = p.rest.tick(now);
+            if now.saturating_sub(p.last_snap) >= SNAP_EVERY {
+                p.last_snap = now;
+                let snap = p.poll().snapshot(now);
+                let moving = snap.hz.is_some();
+                if snap.reports != p.last_reports || (!moving && !p.idle_sent) {
+                    p.idle_sent = !moving;
+                    p.last_reports = snap.reports;
+                    self.buf.push(Ev::Poll(snap));
+                }
+                if p.left.is_active() || p.right.is_active() || p.rest.is_running() || finished {
+                    self.buf.push(Ev::Sticks { left: p.left.snapshot(), right: p.right.snapshot(), rest: p.rest.snapshot(now) });
+                }
+            }
+        }
         None
     }
 
@@ -276,7 +383,7 @@ impl Session {
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.buf.is_empty() || self.mouse.as_ref().is_some_and(|m| m.n > 0)
+        !self.buf.is_empty() || self.mouse.as_ref().is_some_and(|m| m.n > 0) || self.pad.as_ref().is_some_and(|p| !p.pending.is_empty())
     }
 
     pub fn take_frame(&mut self) -> Option<Frame> {
@@ -287,6 +394,11 @@ impl Session {
                 m.dy = 0;
                 m.n = 0;
                 self.buf.push(ev);
+            }
+        }
+        if let Some(p) = self.pad.as_mut() {
+            if !p.pending.is_empty() {
+                self.buf.push(Ev::Pad { items: std::mem::take(&mut p.pending) });
             }
         }
         if self.buf.is_empty() {
@@ -308,6 +420,11 @@ pub enum SessionCommand {
     SensorStop,
     SensorReset,
     MouseReset,
+    PadCircleStart,
+    PadCircleStop,
+    PadCircleReset,
+    PadRestStart { secs: f32 },
+    PadRumble { strong: f32, weak: f32, ms: u32 },
 }
 
 pub struct StartReq {
@@ -320,6 +437,8 @@ pub struct StartReq {
 
 pub enum EngineMsg {
     Raw(RawEvent),
+    Pad(PadMsg),
+    Hid(HidReport),
     Start(Box<StartReq>),
     /// the user asked to leave (exit button)
     End(EndReason),
@@ -337,6 +456,7 @@ pub struct EngineHandle {
 }
 
 struct Live {
+    _reader: Option<HidReader>,
     session: Session,
     sink: Box<dyn FrameSink>,
     capture_disabled: bool,
@@ -345,8 +465,11 @@ struct Live {
     last_refresh: u64,
 }
 
-pub fn spawn(platform: Arc<dyn Platform>, nudge: Arc<Nudge>, no_capture: bool) -> EngineHandle {
-    let (tx, rx) = mpsc::channel::<EngineMsg>();
+pub fn channel() -> (Sender<EngineMsg>, Receiver<EngineMsg>) {
+    mpsc::channel()
+}
+
+pub fn spawn(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platform>, nudge: Arc<Nudge>, no_capture: bool, pads: Sender<PadCmd>) -> EngineHandle {
     let active = Arc::new(AtomicBool::new(false));
 
     let raw_tx = tx.clone();
@@ -357,17 +480,18 @@ pub fn spawn(platform: Arc<dyn Platform>, nudge: Arc<Nudge>, no_capture: bool) -
         eprintln!("[inputlab] raw input unavailable: {e}");
     }
 
-    let handle = EngineHandle { tx, active: active.clone() };
+    let handle = EngineHandle { tx: tx.clone(), active: active.clone() };
     thread::Builder::new()
         .name("inputlab-engine".into())
-        .spawn(move || run(rx, platform, nudge, active, no_capture))
+        .spawn(move || run(rx, tx, platform, nudge, active, no_capture, pads))
         .expect("spawn engine thread");
     handle
 }
 
-fn finish(live: &mut Option<Live>, platform: &Arc<dyn Platform>, active: &AtomicBool, reason: EndReason) {
+fn finish(live: &mut Option<Live>, platform: &Arc<dyn Platform>, active: &AtomicBool, reason: EndReason, pads: &Sender<PadCmd>) {
     // release first: the os must be free before anything else can go wrong
     platform.end_capture();
+    let _ = pads.send(PadCmd::Watch(None));
     active.store(false, Ordering::SeqCst);
     if let Some(mut l) = live.take() {
         l.session.push(Ev::Ended { reason });
@@ -377,7 +501,7 @@ fn finish(live: &mut Option<Live>, platform: &Arc<dyn Platform>, active: &Atomic
     }
 }
 
-fn run(rx: Receiver<EngineMsg>, platform: Arc<dyn Platform>, nudge: Arc<Nudge>, active: Arc<AtomicBool>, no_capture: bool) {
+fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platform>, nudge: Arc<Nudge>, active: Arc<AtomicBool>, no_capture: bool, pads: Sender<PadCmd>) {
     let mut live: Option<Live> = None;
     let mut last_tick = 0u64;
 
@@ -397,13 +521,13 @@ fn run(rx: Receiver<EngineMsg>, platform: Arc<dyn Platform>, nudge: Arc<Nudge>, 
                     l.session.on_raw(&ev);
                 }
                 if let Some(r) = end {
-                    finish(&mut live, &platform, &active, r);
+                    finish(&mut live, &platform, &active, r, &pads);
                 }
             }
             Ok(EngineMsg::Start(req)) => {
                 // a new session replaces any old one; release before arming again
                 if live.is_some() {
-                    finish(&mut live, &platform, &active, EndReason::UiGone);
+                    finish(&mut live, &platform, &active, EndReason::UiGone, &pads);
                 }
                 let req = *req;
                 let settings = req.settings.sanitized();
@@ -422,7 +546,16 @@ fn run(rx: Receiver<EngineMsg>, platform: Arc<dyn Platform>, nudge: Arc<Nudge>, 
                             no_capture,
                         };
                         active.store(true, Ordering::SeqCst);
-                        live = Some(Live { session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now });
+                        let mut reader = None;
+                        if let Some(pad) = session.pad_id() {
+                            let _ = pads.send(PadCmd::Watch(Some(pad)));
+                            // the real polling rate comes from hid report timestamps, when the device lets us open it
+                            if let Some(path) = info.device.hid_paths.first() {
+                                let t = tx.clone();
+                                reader = HidReader::open(path, move |r| { let _ = t.send(EngineMsg::Hid(r)); }).ok();
+                            }
+                        }
+                        live = Some(Live { _reader: reader, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now });
                         let _ = req.reply.send(Ok(info));
                     }
                     Err(e) => {
@@ -437,17 +570,32 @@ fn run(rx: Receiver<EngineMsg>, platform: Arc<dyn Platform>, nudge: Arc<Nudge>, 
                     _ => true,
                 });
                 if allowed {
-                    finish(&mut live, &platform, &active, reason);
+                    finish(&mut live, &platform, &active, reason, &pads);
                 }
             }
             Ok(EngineMsg::FocusLost) => {
                 let end = live.as_mut().and_then(|l| l.session.on_focus_lost(now));
                 if let Some(r) = end {
-                    finish(&mut live, &platform, &active, r);
+                    finish(&mut live, &platform, &active, r, &pads);
+                }
+            }
+            Ok(EngineMsg::Pad(m)) => {
+                if let Some(l) = live.as_mut() {
+                    l.session.on_pad(&m, now);
+                }
+            }
+            Ok(EngineMsg::Hid(r)) => {
+                if let Some(l) = live.as_mut() {
+                    l.session.on_hid(&r);
                 }
             }
             Ok(EngineMsg::Command(cmd)) => {
                 if let Some(l) = live.as_mut() {
+                    if let SessionCommand::PadRumble { strong, weak, ms } = cmd {
+                        if let Some(pad) = l.session.pad_id() {
+                            let _ = pads.send(PadCmd::Rumble { pad, strong, weak, ms });
+                        }
+                    }
                     l.session.command(cmd, now);
                 }
             }
@@ -457,12 +605,12 @@ fn run(rx: Receiver<EngineMsg>, platform: Arc<dyn Platform>, nudge: Arc<Nudge>, 
                 }
             }
             Ok(EngineMsg::Shutdown) => {
-                finish(&mut live, &platform, &active, EndReason::Shutdown);
+                finish(&mut live, &platform, &active, EndReason::Shutdown, &pads);
                 break;
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => {
-                finish(&mut live, &platform, &active, EndReason::Shutdown);
+                finish(&mut live, &platform, &active, EndReason::Shutdown, &pads);
                 break;
             }
         }
@@ -495,7 +643,7 @@ fn run(rx: Receiver<EngineMsg>, platform: Arc<dyn Platform>, nudge: Arc<Nudge>, 
             }
         }
         if let Some(r) = end {
-            finish(&mut live, &platform, &active, r);
+            finish(&mut live, &platform, &active, r, &pads);
         }
     }
 }
@@ -766,6 +914,87 @@ mod tests {
         assert!(s.take_frame().is_none());
     }
 
+    fn pad_dev() -> Session {
+        let mut d = dev(DeviceKind::Gamepad, Viewer::Gamepad, vec![]);
+        d.pad_id = Some(3);
+        Session::new(d, &SessionSettings::default(), T0)
+    }
+
+    fn pe(pad: usize, name: &str, v: f32, axis: bool, ts: u64) -> PadMsg {
+        PadMsg::Event(crate::devices::gamepad::PadEvent { pad, name: name.into(), code: format!("c-{name}"), value: v, axis, ts })
+    }
+
+    #[test]
+    fn pad_events_are_coalesced_per_control_and_filtered_by_pad() {
+        let mut s = pad_dev();
+        s.on_pad(&pe(3, "LeftStickX", 0.1, true, T0 + MS), T0);
+        s.on_pad(&pe(3, "LeftStickX", 0.7, true, T0 + 2 * MS), T0);
+        s.on_pad(&pe(3, "South", 1.0, false, T0 + 3 * MS), T0);
+        s.on_pad(&pe(9, "North", 1.0, false, T0 + 3 * MS), T0); // another pad
+        let f = s.take_frame().unwrap();
+        let items = f.events.iter().find_map(|e| if let Ev::Pad { items } = e { Some(items.clone()) } else { None }).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items.iter().find(|i| i.name == "LeftStickX").unwrap().value, 0.7, "latest value wins");
+        assert!(items.iter().all(|i| i.name != "North"));
+    }
+
+    #[test]
+    fn controller_polling_prefers_hid_report_timestamps_over_events() {
+        let mut s = pad_dev();
+        for i in 0..400u64 {
+            s.on_pad(&pe(3, "LeftStickX", (i % 7) as f32 / 10.0, true, T0 + i * 4 * MS), T0); // 250hz of events
+        }
+        s.tick(T0 + 2000 * MS);
+        let hz = |f: &Frame| f.events.iter().rev().find_map(|e| if let Ev::Poll(p) = e { p.avg_hz } else { None });
+        assert!((hz(&s.take_frame().unwrap()).unwrap() - 250.0).abs() < 3.0);
+        for i in 0..2000u64 {
+            s.on_hid(&HidReport { ts: T0 + 2000 * MS + i * MS, data: vec![0] }); // real 1000hz reports
+        }
+        s.tick(T0 + 4100 * MS);
+        assert!((hz(&s.take_frame().unwrap()).unwrap() - 1000.0).abs() < 5.0);
+    }
+
+    #[test]
+    fn circle_test_through_commands_reports_a_circular_gate() {
+        let mut s = pad_dev();
+        s.command(SessionCommand::PadCircleStart, T0);
+        for i in 0..720 {
+            let a = (i as f32 / 720.0) * std::f32::consts::TAU;
+            s.on_pad(&pe(3, "LeftStickX", a.cos(), true, T0 + i as u64 * MS), T0);
+            s.on_pad(&pe(3, "LeftStickY", a.sin(), true, T0 + i as u64 * MS), T0);
+        }
+        s.command(SessionCommand::PadCircleStop, T0 + 800 * MS);
+        let f = s.take_frame().unwrap();
+        let left = f.events.iter().rev().find_map(|e| if let Ev::Sticks { left, .. } = e { Some(left.clone()) } else { None }).unwrap();
+        assert!(left.circularity.unwrap() > 0.98);
+        assert!(!left.active);
+    }
+
+    #[test]
+    fn rest_test_flags_a_drifting_stick() {
+        let mut s = pad_dev();
+        s.command(SessionCommand::PadRestStart { secs: 2.0 }, T0);
+        for i in 0..200u64 {
+            s.on_pad(&pe(3, "LeftStickX", 0.11, true, T0 + i * 5 * MS), T0);
+            s.on_pad(&pe(3, "LeftStickY", 0.0, true, T0 + i * 5 * MS), T0);
+            s.on_pad(&pe(3, "RightStickX", 0.0, true, T0 + i * 5 * MS), T0);
+        }
+        s.tick(T0 + 2100 * MS);
+        let f = s.take_frame().unwrap();
+        let rest = f.events.iter().rev().find_map(|e| if let Ev::Sticks { rest, .. } = e { Some(rest.clone()) } else { None }).unwrap();
+        assert!(!rest.running);
+        assert!(rest.entries.iter().find(|e| e.name == "left stick").unwrap().drift);
+        assert!(!rest.entries.iter().find(|e| e.name == "right stick").unwrap().drift);
+    }
+
+    #[test]
+    fn battery_and_rumble_support_reach_the_ui() {
+        let mut s = pad_dev();
+        s.on_pad(&PadMsg::Status(crate::devices::gamepad::PadStatus { pad: 3, force_feedback: true, power: "discharging".into(), battery: Some(55) }), T0);
+        let f = s.take_frame().unwrap();
+        assert!(f.events.iter().any(|e| matches!(e, Ev::PadInfo { force_feedback: true, battery: Some(55), .. })));
+    }
+
     #[test]
     fn frames_are_sequenced() {
         let mut s = kbd_session();
@@ -843,7 +1072,10 @@ mod engine_thread_tests {
     fn rig() -> Rig {
         let fake = Arc::new(Fake::default());
         fake.fg.store(true, Ordering::SeqCst);
-        let eng = spawn(fake.clone(), Arc::new(Nudge::default()), false);
+        let (tx, rx) = channel();
+        let (pad_tx, _pad_rx) = mpsc::channel();
+        std::mem::forget(_pad_rx);
+        let eng = spawn(rx, tx, fake.clone(), Arc::new(Nudge::default()), false, pad_tx);
         Rig { fake, eng, frames: Arc::new(Mutex::new(vec![])), alive: Arc::new(AtomicBool::new(true)) }
     }
 

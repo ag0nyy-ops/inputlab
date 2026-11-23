@@ -2,6 +2,7 @@
 //! one shared HidApi instance: the crate only allows one at a time.
 
 pub mod analog;
+pub mod reader;
 
 use std::sync::{Mutex, OnceLock};
 
