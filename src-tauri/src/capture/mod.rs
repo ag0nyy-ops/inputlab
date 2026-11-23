@@ -22,11 +22,13 @@ pub struct SessionSettings {
     pub esc_hold_ms: u32,
     pub combo_hold_ms: u32,
     pub chatter_ms: f64,
+    /// safe mode from the settings screen: same as launching with --no-capture
+    pub disable_capture: bool,
 }
 
 impl Default for SessionSettings {
     fn default() -> Self {
-        Self { esc_hold_ms: ESC_HOLD_DEFAULT_MS, combo_hold_ms: COMBO_HOLD_DEFAULT_MS, chatter_ms: crate::timing::keystats::CHATTER_DEFAULT_MS }
+        Self { esc_hold_ms: ESC_HOLD_DEFAULT_MS, combo_hold_ms: COMBO_HOLD_DEFAULT_MS, chatter_ms: crate::timing::keystats::CHATTER_DEFAULT_MS, disable_capture: false }
     }
 }
 
@@ -38,6 +40,7 @@ impl SessionSettings {
             esc_hold_ms: self.esc_hold_ms.clamp(300, 5000),
             combo_hold_ms: self.combo_hold_ms.clamp(500, 6000),
             chatter_ms: if self.chatter_ms.is_finite() { self.chatter_ms.clamp(5.0, 200.0) } else { 30.0 },
+            disable_capture: self.disable_capture,
         }
     }
 }
@@ -358,7 +361,7 @@ mod tests {
 
     #[test]
     fn settings_are_clamped() {
-        let s = SessionSettings { esc_hold_ms: 0, combo_hold_ms: 10_000_000, chatter_ms: f64::NAN }.sanitized();
+        let s = SessionSettings { esc_hold_ms: 0, combo_hold_ms: 10_000_000, chatter_ms: f64::NAN, disable_capture: false }.sanitized();
         assert_eq!(s.esc_hold_ms, 300);
         assert_eq!(s.combo_hold_ms, 6000);
         assert_eq!(s.chatter_ms, 30.0);

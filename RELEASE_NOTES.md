@@ -1,4 +1,4 @@
-inputlab 0.1.2. **if you installed 0.1.0, replace it with this.** on windows 0.1.0 never received any keyboard or mouse input (the window toolkit silently replaced the app's raw input registration), which also made the exit keys dead. fixed here, with hook fallbacks so the exit keys keep working even if raw input ever goes quiet, and the device list now shows one entry per physical device instead of every windows interface, with real names: a wireless mouse is "logitech wireless mouse (usb receiver)" until you pick its model (then the list uses that name), and laptop trackpads are called touchpads and have their own drawing.
+inputlab 0.1.3. **if you installed 0.1.0, replace it with this.** on windows 0.1.0 never received any keyboard or mouse input (the window toolkit silently replaced the app's raw input registration), which also made the exit keys dead. fixed here, with hook fallbacks so the exit keys keep working even if raw input ever goes quiet, and the device list now shows one entry per physical device instead of every windows interface, with real names: a wireless mouse is "logitech wireless mouse (usb receiver)" until you pick its model (then the list uses that name), and laptop trackpads are called touchpads and have their own drawing. dualsense and dualshock 4 pads are now read straight from hid, so they get the right drawing and the stick and drift tests. there is a safe mode switch in settings (same as `--no-capture`) for first runs.
 
 inputlab is a native desktop input tester: it finds every keyboard, mouse, controller, midi device and hid gadget, shows each one live, and measures polling rate and dpi from real raw input. no accounts, no network, everything stays on your machine.
 
@@ -36,6 +36,7 @@ if the window loses focus, the ui stops answering, or the app crashes, everythin
 
 - if windows ever stops delivering raw input to the app, keys and clicks are read from the system hooks instead and a banner says so, so the exit keys keep working. movement and polling rate need raw input and will be missing in that case.
 - the windows lockdown (cursor clip, hooks, esc-hold, exit combo) compiles and its logic is unit tested, but it has not yet been run on a real machine by the author. use `--no-capture` first and report anything odd.
+- steam interferes with playstation pads (it grabs the ps button and can show the pad as an xbox one): close steam while testing.
 - not checked on real hardware: 4k and 8k mice, analog keyboards (the wooting report format is unverified), specific controllers, rumble and battery.
 - ctrl+alt+del, win+l and other os-reserved combos cannot be captured. the keyboard view lists them as reserved.
 - mouse and controller silhouettes are grip families, not product renders.

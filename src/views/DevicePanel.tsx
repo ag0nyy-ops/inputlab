@@ -14,7 +14,8 @@ import type { DeviceInfo } from '../lib/types';
 
 function Rules({ dev }: { dev: DeviceInfo }) {
   const s = useSettings();
-  const noCapture = useStore((st) => st.info?.noCapture);
+  const flag = useStore((st) => st.info?.noCapture);
+  const noCapture = flag || s.safeMode;
   const esc = (s.escHoldMs / 1000).toString();
   const combo = (s.comboHoldMs / 1000).toString();
   return (

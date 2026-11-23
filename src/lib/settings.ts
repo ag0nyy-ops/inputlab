@@ -8,6 +8,8 @@ export interface Settings {
   comboHoldMs: number;
   /** release->press gap under this many ms counts as switch chatter */
   chatterMs: number;
+  /** safe mode: capture nothing, same as --no-capture */
+  safeMode: boolean;
   distanceUnit: 'in' | 'cm';
   /** physical distance of the dpi test, in `distanceUnit` */
   dpiDistance: number;
@@ -20,6 +22,7 @@ export const defaults: Settings = {
   escHoldMs: 1000,
   comboHoldMs: 1500,
   chatterMs: 30,
+  safeMode: false,
   distanceUnit: 'in',
   dpiDistance: 2,
   rulerPxPerInch: 96,

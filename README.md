@@ -67,6 +67,10 @@ safety nets, all in rust so a frozen ui cannot trap you:
 - losing the window, closing the webview, a panic or quitting always releases the cursor clip, the hooks and the device grab.
 - the on-screen exit button is refused by rust in mouse sessions, not only hidden.
 
+### safe mode
+
+if you do not want to deal with flags, open **settings** and turn on **safe mode**. it is exactly the same as `--no-capture`: nothing is locked, hooked or swallowed, and the exit button works in every test.
+
 ### the failsafe: `--no-capture`
 
 if anything ever misbehaves, start the app with `--no-capture` (or set `INPUTLAB_NO_CAPTURE=1`). nothing is clipped, hooked, swallowed or grabbed, and the exit button works in every test, mouse included.
@@ -75,7 +79,13 @@ if anything ever misbehaves, start the app with `--no-capture` (or set `INPUTLAB
 inputlab --no-capture
 ```
 
-on windows: run `inputlab.exe --no-capture` from a terminal or a shortcut with that argument. and ctrl+alt+del always works.
+on windows: make a shortcut to inputlab, right-click it, properties, and add ` --no-capture` to the end of the target box (after the closing quote). or run `inputlab.exe --no-capture` from a terminal. and ctrl+alt+del always works.
+
+## playstation controllers and steam
+
+windows' game-controller layer does not expose dualsense and dualshock 4 pads, so inputlab reads their hid reports directly and decodes the sticks, triggers and buttons itself (usb and bluetooth). the report layouts are the publicly documented ones and are checked against hand-built reports, not yet against every real pad. rumble and battery are not available for pads read this way.
+
+steam can interfere: its controller support grabs the ps button system-wide (it opens steam) and can present your pad as a virtual xbox controller. inputlab cannot block another app's hook, and a session ends when the window loses focus. close steam while you test.
 
 ## how accurate are the numbers
 

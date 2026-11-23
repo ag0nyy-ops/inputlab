@@ -184,11 +184,14 @@ struct PadState {
     last_snap: u64,
     last_reports: u64,
     idle_sent: bool,
+    /// pads read straight from hid reports (playstation) have no gilrs events
+    hid_kind: Option<crate::hid::pads::HidPad>,
+    hid_last: std::collections::HashMap<&'static str, f32>,
 }
 
 impl PadState {
     fn new(pad: usize) -> Self {
-        Self { pad, events: PollEstimator::new(), hid: PollEstimator::new(), hid_seen: false, left: StickTest::new(), right: StickTest::new(), rest: RestTest::new(), pending: vec![], last_snap: 0, last_reports: 0, idle_sent: true }
+        Self { hid_kind: None, hid_last: Default::default(), pad, events: PollEstimator::new(), hid: PollEstimator::new(), hid_seen: false, left: StickTest::new(), right: StickTest::new(), rest: RestTest::new(), pending: vec![], last_snap: 0, last_reports: 0, idle_sent: true }
     }
     fn poll(&self) -> &PollEstimator {
         if self.hid_seen { &self.hid } else { &self.events }
@@ -217,7 +220,7 @@ pub struct Session {
 impl Session {
     pub fn new(device: DeviceInfo, settings: &SessionSettings, now: u64) -> Self {
         let mode = mode_for(device.viewer);
-        let (device_viewer, device_pad_id) = (device.viewer, device.pad_id);
+        let (device_viewer, device_pad_id, device_vid, device_pid) = (device.viewer, device.pad_id, device.vid, device.pid);
         Self {
             srcs: device.srcs.iter().copied().collect(),
             exit: ExitTracker::new(ExitRule::for_mode(mode, settings)),
@@ -232,7 +235,15 @@ impl Session {
             hid: None,
             analog: None,
             midi: device_viewer == Viewer::Midi,
-            pad: (device_viewer == Viewer::Gamepad).then(|| PadState::new(device_pad_id.unwrap_or(usize::MAX))),
+            pad: (device_viewer == Viewer::Gamepad).then(|| {
+                let mut p = PadState::new(device_pad_id.unwrap_or(usize::MAX));
+                if device_pad_id.is_none() {
+                    if let (Some(v), Some(pid)) = (device_vid, device_pid) {
+                        p.hid_kind = crate::hid::pads::kind_for(v, pid);
+                    }
+                }
+                p
+            }),
             buf: Vec::new(),
             seq: 0,
         }
@@ -322,30 +333,34 @@ impl Session {
             }
             PadMsg::Event(e) if e.pad == p.pad => {
                 p.events.push(e.ts);
-                // sticks
-                let stick = |t: &mut StickTest, rest: &mut RestTest, which: &str, x: Option<f32>, y: Option<f32>| {
-                    let (cx, cy) = t.pos();
-                    let (nx, ny) = (x.unwrap_or(cx), y.unwrap_or(cy));
-                    t.feed(nx, ny);
-                    rest.feed(which, true, nx, ny);
-                };
-                match e.name.as_str() {
-                    "LeftStickX" => stick(&mut p.left, &mut p.rest, "left stick", Some(e.value), None),
-                    "LeftStickY" => stick(&mut p.left, &mut p.rest, "left stick", None, Some(e.value)),
-                    "RightStickX" => stick(&mut p.right, &mut p.rest, "right stick", Some(e.value), None),
-                    "RightStickY" => stick(&mut p.right, &mut p.rest, "right stick", None, Some(e.value)),
-                    "LeftTrigger2" | "LeftZ" => p.rest.feed("left trigger", false, e.value, 0.0),
-                    "RightTrigger2" | "RightZ" => p.rest.feed("right trigger", false, e.value, 0.0),
-                    _ => {}
-                }
-                let item = PadItem { name: e.name.clone(), code: e.code.clone(), value: e.value, axis: e.axis };
-                match p.pending.iter_mut().find(|i| i.name == item.name && i.code == item.code) {
-                    Some(old) => *old = item,
-                    None => p.pending.push(item),
-                }
+                Self::apply_item(p, &e.name, e.code.clone(), e.value, e.axis);
                 let _ = now;
             }
             _ => {}
+        }
+    }
+
+    /// one control changed: update the stick and drift tests, and queue it for the ui
+    fn apply_item(p: &mut PadState, name: &str, code: String, value: f32, axis: bool) {
+        let stick = |t: &mut StickTest, rest: &mut RestTest, which: &str, x: Option<f32>, y: Option<f32>| {
+            let (cx, cy) = t.pos();
+            let (nx, ny) = (x.unwrap_or(cx), y.unwrap_or(cy));
+            t.feed(nx, ny);
+            rest.feed(which, true, nx, ny);
+        };
+        match name {
+            "LeftStickX" => stick(&mut p.left, &mut p.rest, "left stick", Some(value), None),
+            "LeftStickY" => stick(&mut p.left, &mut p.rest, "left stick", None, Some(value)),
+            "RightStickX" => stick(&mut p.right, &mut p.rest, "right stick", Some(value), None),
+            "RightStickY" => stick(&mut p.right, &mut p.rest, "right stick", None, Some(value)),
+            "LeftTrigger2" | "LeftZ" => p.rest.feed("left trigger", false, value, 0.0),
+            "RightTrigger2" | "RightZ" => p.rest.feed("right trigger", false, value, 0.0),
+            _ => {}
+        }
+        let item = PadItem { name: name.to_string(), code, value, axis };
+        match p.pending.iter_mut().find(|i| i.name == item.name && i.code == item.code) {
+            Some(old) => *old = item,
+            None => p.pending.push(item),
         }
     }
 
@@ -375,10 +390,24 @@ impl Session {
         if let Some(p) = self.pad.as_mut() {
             if !p.hid_seen {
                 p.hid_seen = true;
+                if p.hid_kind.is_some() {
+                    self.buf.push(Ev::PadInfo { force_feedback: false, power: "unknown".into(), battery: None, poll_source: "hid reports".into() });
+                }
                 p.last_reports = 0; // switch the poll source cleanly
                 p.idle_sent = false;
             }
             p.hid.push(r.ts);
+            if let Some(kind) = p.hid_kind {
+                if let Some(items) = crate::hid::pads::decode(kind, &r.data) {
+                    for (name, v, axis) in items {
+                        let changed = p.hid_last.get(name).is_none_or(|o| (o - v).abs() > 0.002);
+                        if changed {
+                            p.hid_last.insert(name, v);
+                            Self::apply_item(p, name, "hid".to_string(), v, axis);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -674,6 +703,8 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                 let req = *req;
                 let settings = req.settings.sanitized();
                 let mode = mode_for(req.device.viewer);
+                // safe mode (settings) and --no-capture are the same thing
+                let no_capture = no_capture || settings.disable_capture;
                 let spec = CaptureSpec { mode, window: req.window, disabled: no_capture };
                 match platform.begin_capture(&spec) {
                     Ok(report) => {
@@ -1316,6 +1347,37 @@ mod tests {
     }
 
     #[test]
+    fn a_dualsense_read_over_hid_drives_the_controller_tests() {
+        let mut d = dev(DeviceKind::Gamepad, Viewer::Gamepad, vec![]);
+        d.vid = Some(0x054c);
+        d.pid = Some(0x0ce6);
+        let mut s = Session::new(d, &SessionSettings::default(), T0);
+        let rep = |lx: u8, ly: u8, b0: u8, ts: u64| {
+            let mut r = vec![0u8; 64];
+            r[0] = 1;
+            r[1..11].copy_from_slice(&[lx, ly, 128, 128, 0, 0, 0, b0, 0, 0]);
+            HidReport { ts, data: r }
+        };
+        s.command(SessionCommand::PadCircleStart, T0);
+        for i in 0..720u64 {
+            let a = (i as f32 / 720.0) * std::f32::consts::TAU;
+            s.on_hid(&rep((127.5 + 127.5 * a.cos()) as u8, (127.5 - 127.5 * a.sin()) as u8, 0x28, T0 + i * MS));
+        }
+        let f = s.take_frame().unwrap();
+        let items: Vec<_> = f.events.iter().filter_map(|e| if let Ev::Pad { items } = e { Some(items.clone()) } else { None }).flatten().collect();
+        assert!(items.iter().any(|i| i.name == "South" && i.value == 1.0), "cross pressed");
+        assert!(items.iter().any(|i| i.name == "LeftStickX"));
+        assert!(f.events.iter().any(|e| matches!(e, Ev::PadInfo { poll_source, .. } if poll_source == "hid reports")));
+        s.command(SessionCommand::PadCircleStop, T0 + 800 * MS);
+        let left = s.take_frame().unwrap().events.iter().rev().find_map(|e| if let Ev::Sticks { left, .. } = e { Some(left.clone()) } else { None }).unwrap();
+        assert!(left.circularity.unwrap() > 0.95, "{:?}", left.circularity);
+        // polling comes from the report timestamps
+        s.tick(T0 + 900 * MS);
+        let hz = s.take_frame().unwrap().events.iter().find_map(|e| if let Ev::Poll(p) = e { p.avg_hz } else { None }).unwrap();
+        assert!((hz - 1000.0).abs() < 10.0);
+    }
+
+    #[test]
     fn frames_are_sequenced() {
         let mut s = kbd_session();
         s.on_raw(&key(1, "KeyA", true, T0));
@@ -1406,7 +1468,7 @@ mod engine_thread_tests {
             let (tx, rx) = mpsc::channel();
             let req = StartReq {
                 device: d,
-                settings: SessionSettings { esc_hold_ms: 400, combo_hold_ms: 600, chatter_ms: 30.0 }.sanitized(),
+                settings: SessionSettings { esc_hold_ms: 400, combo_hold_ms: 600, chatter_ms: 30.0, disable_capture: false }.sanitized(),
                 window: None,
                 sink: Box::new(Collect { frames: self.frames.clone(), alive: self.alive.clone() }),
                 reply: tx,

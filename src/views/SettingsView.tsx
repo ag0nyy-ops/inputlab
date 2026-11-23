@@ -45,6 +45,15 @@ export function SettingsView() {
         <div className="rule" />
       </header>
 
+      <div className="field">
+        <span className="label">safe mode</span>
+        <button className="toggle" role="switch" aria-checked={s.safeMode} onClick={() => updateSettings({ safeMode: !s.safeMode })}>
+          <span className="toggle__box" />
+          <span className="label label--sm">{s.safeMode ? 'on: nothing is locked' : 'off: tests capture the device'}</span>
+        </button>
+        <p className="case__sub">same as starting with --no-capture. the mouse and keyboard stay free, nothing is hooked, and the exit button works in every test. turn it on the first time you try a new machine.</p>
+      </div>
+
       <NumberField label="esc hold (mouse tests)" value={s.escHoldMs} min={300} max={5000} unit="ms" hint="how long esc is held to leave a mouse test. 300 to 5000." onValid={(n) => updateSettings({ escHoldMs: n })} />
       <NumberField label="exit combo hold (keyboard tests)" value={s.comboHoldMs} min={500} max={6000} unit="ms" hint="how long ctrl+alt+shift+backspace is held. 500 to 6000." onValid={(n) => updateSettings({ comboHoldMs: n })} />
 

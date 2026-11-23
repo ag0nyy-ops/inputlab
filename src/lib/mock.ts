@@ -69,6 +69,7 @@ export function mockBridge(): Bridge {
   let stop = () => {};
   let endNow: ((e: Ev & { t: 'ended' }) => void) | null = null;
   let activeMode: CaptureMode = 'other';
+  let sessionNoCapture = false;
   let cmdHandler: ((c: SessionCommand) => void) | null = null;
   const modeOf = (d: DeviceInfo): CaptureMode => (d.viewer === 'mouse' ? 'mouse' : d.viewer === 'keyboard' ? 'keyboard' : 'other');
   return {
@@ -77,7 +78,8 @@ export function mockBridge(): Bridge {
       const device = devices().find((d) => d.id === deviceId)!;
       const mode = modeOf(device);
       activeMode = mode;
-      const noCapture = info.noCapture;
+      const noCapture = info.noCapture || settings.disableCapture;
+      sessionNoCapture = noCapture;
       const down = new Set<string>();
       let since = 0;
       let maxHeld = 0;
@@ -268,7 +270,7 @@ export function mockBridge(): Bridge {
     },
     async endSession() {
       // mirrors the engine: the button never ends a mouse session
-      if (activeMode === 'mouse' && !info.noCapture) return;
+      if (activeMode === 'mouse' && !sessionNoCapture) return;
       endNow?.({ t: 'ended', reason: 'exit-button' });
     },
     heartbeat: async () => {},

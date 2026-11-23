@@ -4,6 +4,7 @@
 
 pub mod analog;
 pub mod descriptor;
+pub mod pads;
 pub mod reader;
 
 use std::sync::{Mutex, OnceLock};

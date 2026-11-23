@@ -334,12 +334,14 @@ pub fn build_device_list(inp: &ScanInputs) -> Vec<DeviceInfo> {
             None => (cols[0], false, "only vendor-defined or system-control interfaces: a configuration channel, not an input"),
         };
         let pad_like = ranked.first().is_some_and(|(r, _)| *r == 0);
+        // playstation pads that gilrs cannot see are decoded straight from their hid reports
+        let hid_pad = usable && pad_like && crate::hid::pads::kind_for(vid, pid).is_some();
         let base_name = product.unwrap_or_else(|| format!("hid device {vid:04x}:{pid:04x}"));
         let mut d = DeviceInfo::base(
             format!("hid-{vid:04x}{pid:04x}"),
             base_name,
             if pad_like { DeviceKind::Gamepad } else { DeviceKind::Hid },
-            Viewer::Hid,
+            if hid_pad { Viewer::Gamepad } else { Viewer::Hid },
             "hidapi",
         );
         d.vid = Some(vid);
@@ -550,6 +552,25 @@ mod tests {
         twin.path = r"\\?\hid#vid_045e&pid_028e&ig_00#7&1#{a}".into();
         i.hid = vec![twin];
         assert_eq!(build_device_list(&i).len(), 1);
+    }
+
+    #[test]
+    fn a_dualsense_only_hid_can_see_gets_the_controller_view() {
+        let mut i = inputs();
+        i.hid = vec![hid(0x054c, 0x0ce6, 1, 5, 0, "Wireless Controller"), hid(0x054c, 0x0ce6, 0xff00, 1, 1, "Wireless Controller")];
+        let list = build_device_list(&i);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].kind, DeviceKind::Gamepad);
+        assert_eq!(list[0].viewer, Viewer::Gamepad);
+        assert_eq!(list[0].backend, "hidapi");
+        assert!(list[0].pad_id.is_none());
+    }
+
+    #[test]
+    fn a_flight_stick_without_a_decoder_still_gets_the_hid_view() {
+        let mut i = inputs();
+        i.hid = vec![hid(0x1234, 0x5678, 1, 4, 0, "arcade stick")];
+        assert_eq!(build_device_list(&i)[0].viewer, Viewer::Hid);
     }
 
     #[test]
