@@ -2,6 +2,8 @@
 // remembered model choices, per device (vid:pid when it has one). local only.
 import { useSyncExternalStore } from 'react';
 import type { DeviceInfo } from '../lib/types';
+import { findModel as findMouse } from './mice';
+import { findPad as findPadModel } from './pads';
 
 const KEY = 'inputlab.models';
 let map: Record<string, string> = {};
@@ -43,4 +45,11 @@ export function usePick(d: Pick<DeviceInfo, 'id' | 'vid' | 'pid'>): string | nul
     },
     () => getPick(d),
   );
+}
+
+/** what to call a device: the model you picked beats the product string ("usb receiver") */
+export function deviceTitle(d: Pick<DeviceInfo, 'id' | 'vid' | 'pid' | 'name' | 'viewer'>, picked: string | null): string {
+  if (!picked) return d.name;
+  const m = findMouse(picked) ?? findPadModel(picked);
+  return m ? m.name : d.name;
 }

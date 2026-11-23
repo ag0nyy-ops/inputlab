@@ -24,7 +24,10 @@ export function mouseHeight(w: number): number {
 /** draw a mouse into the box at (x, y) that is `w` css px wide */
 export function drawMouse(ctx: CanvasRenderingContext2D, id: ShapeId, x: number, y: number, w: number, st: MouseDrawState, labels = true): void {
   const sh = SHAPES[id];
-  const cx = sh.wheel.x + sh.wheel.w / 2;
+  const cx = sh.gutter ?? sh.wheel.x + sh.wheel.w / 2;
+  const bottom = sh.zone === 'bottom';
+  const top = bottom ? sh.split : 0;
+  const zh = bottom ? 400 : sh.split;
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(w / 200, w / 200);
@@ -38,14 +41,15 @@ export function drawMouse(ctx: CanvasRenderingContext2D, id: ShapeId, x: number,
   ctx.clip(p);
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = LINE_STRONG;
-  const gl = cx - sh.wheel.w / 2 - 2;
-  const gr = cx + sh.wheel.w / 2 + 2;
+  const gap = bottom ? 1 : sh.wheel.w / 2 + 2;
+  const gl = cx - gap;
+  const gr = cx + gap;
   ctx.fillStyle = shade(st.b[0]);
-  ctx.fillRect(0, 0, gl, sh.split);
-  ctx.strokeRect(0, 0, gl, sh.split);
+  ctx.fillRect(0, top, gl, zh);
+  ctx.strokeRect(0, top, gl, zh);
   ctx.fillStyle = shade(st.b[1]);
-  ctx.fillRect(gr, 0, 200 - gr, sh.split);
-  ctx.strokeRect(gr, 0, 200 - gr, sh.split);
+  ctx.fillRect(gr, top, 200 - gr, zh);
+  ctx.strokeRect(gr, top, 200 - gr, zh);
   const wb = sh.wheel;
   ctx.fillStyle = shade(st.b[2]);
   ctx.fillRect(wb.x, wb.y, wb.w, wb.h);
@@ -96,8 +100,9 @@ export function drawMouse(ctx: CanvasRenderingContext2D, id: ShapeId, x: number,
   tri(cx + wb.w / 2 + 13, wy, 'r', st.wheel.right);
 
   if (labels) {
-    legend(ctx, '1', cx - 30, sh.split * 0.5, st.b[0], 15);
-    legend(ctx, '2', cx + 30, sh.split * 0.5, st.b[1], 15);
+    const ly = bottom ? sh.split + 20 : sh.split * 0.5;
+    legend(ctx, '1', cx - 30, ly, st.b[0], 15);
+    legend(ctx, '2', cx + 30, ly, st.b[1], 15);
     legend(ctx, '3', cx, wy, st.b[2], 12);
     for (const s of sh.sides) legend(ctx, String(s.n), s.box.x + s.box.w / 2, s.box.y + s.box.h / 2, st.b[s.n - 1]!, 11);
   }

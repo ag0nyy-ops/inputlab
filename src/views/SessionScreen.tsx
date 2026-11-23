@@ -11,9 +11,11 @@ import { Stamp } from '../components/Stamp';
 import { endSession } from '../lib/session';
 import { useStore } from '../lib/store';
 import { SessionBody } from './SessionBody';
+import { deviceTitle, usePick } from '../models/pick';
 
 export function SessionScreen() {
   const s = useStore((st) => st.session);
+  const pick = usePick(useStore((st) => st.session?.device) ?? { id: '', vid: null, pid: null });
   const [notices, setNotices] = useState<string[]>([]);
   useEffect(() => onFrame((evs) => { for (const e of evs) if (e.t === 'notice') setNotices((n) => (n.includes(e.text) ? n : [...n, e.text])); }), []);
   const gone = useStore((st) => st.session !== null && st.devices.some((d) => d.id === st.session!.device.id && !d.connected));
@@ -39,7 +41,7 @@ export function SessionScreen() {
       <header className="session__top">
         <div className="session__id">
           <p className="label">test in progress</p>
-          <h1 className="title title--sm">{s.device.name}</h1>
+          <h1 className="title title--sm">{deviceTitle(s.device, pick)}</h1>
         </div>
         <div className="session__stamps">
           {gone ? <Stamp tone="problem">unplugged</Stamp> : <Stamp>live</Stamp>}

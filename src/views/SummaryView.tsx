@@ -6,7 +6,7 @@ import { buildJson, buildText } from '../lib/export';
 import { endMessages } from '../lib/messages';
 import { results } from '../lib/results';
 import { setState, useStore } from '../lib/store';
-import { getPick } from '../models/pick';
+import { deviceTitle, getPick } from '../models/pick';
 
 export function SummaryView() {
   const last = useStore((s) => s.lastSession);
@@ -48,7 +48,7 @@ export function SummaryView() {
     <article className="panel files">
       <header className="file">
         <p className="label file__no">session summary</p>
-        <h1 className="title" style={{ marginTop: '.5rem' }}>{last.info.device.name}</h1>
+        <h1 className="title" style={{ marginTop: '.5rem' }}>{deviceTitle(last.info.device, getPick(last.info.device))}</h1>
         <div className="rule" />
       </header>
 

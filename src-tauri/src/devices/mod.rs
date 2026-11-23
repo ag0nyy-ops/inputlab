@@ -137,6 +137,50 @@ fn product_for(hid: &[HidInfo], vid: Option<u16>, pid: Option<u16>) -> Option<St
         .find(|s| !s.trim().is_empty())
 }
 
+fn maker_for(hid: &[HidInfo], vid: Option<u16>, pid: Option<u16>) -> Option<String> {
+    let (v, p) = (vid?, pid?);
+    hid.iter()
+        .filter(|h| h.vid == v && h.pid == p)
+        .filter_map(|h| h.manufacturer.clone())
+        .find(|s| !s.trim().is_empty() && !s.to_lowercase().contains("(standard"))
+}
+
+/// names windows gives to nearly everything: they say nothing about what the thing is
+fn generic_product(p: &str) -> bool {
+    let l = p.to_lowercase();
+    ["receiver", "dongle", "usb input device", "hid-compliant", "usb device", "hid keyboard", "hid mouse", "composite"].iter().any(|g| l.contains(g)) || l.trim() == "mouse" || l.trim() == "keyboard"
+}
+
+/// a name a person recognises. a product string that actually names the model wins; "usb receiver"
+/// does not, so a wireless mouse becomes "logitech wireless mouse (usb receiver)" and the model picker
+/// takes it from there. devices with no usb ids are told apart by what their windows path says.
+fn friendly_raw_name(kind: DeviceKind, vid: Option<u16>, pid: Option<u16>, product: Option<String>, maker: Option<String>, paths: &[&str]) -> String {
+    let label = if kind == DeviceKind::Keyboard { "keyboard" } else { "mouse" };
+    if vid.is_some() && pid.is_some() {
+        match product {
+            Some(p) if !generic_product(&p) => return p,
+            p => {
+                let wireless = p.as_deref().is_some_and(|x| {
+                    let l = x.to_lowercase();
+                    l.contains("receiver") || l.contains("dongle")
+                });
+                let who = maker.unwrap_or_default();
+                let what = if wireless { format!("wireless {label} (usb receiver)") } else { format!("usb {label}") };
+                return format!("{who} {what}").trim().to_string();
+            }
+        }
+    }
+    let up: Vec<String> = paths.iter().map(|p| p.to_ascii_uppercase()).collect();
+    let has = |toks: &[&str]| up.iter().any(|p| toks.iter().any(|t| p.contains(t)));
+    match kind {
+        DeviceKind::Mouse if has(&["ELAN", "SYNA", "ALPS", "MSFT", "I2C", "TOUCHPAD", "TPD", "SYNP", "CRQ"]) => "laptop touchpad".into(),
+        DeviceKind::Mouse if has(&["PNP0F"]) => "ps/2 mouse".into(),
+        DeviceKind::Mouse => "system pointing device (touchpad or ps/2)".into(),
+        _ if has(&["PNP0303", "I8042"]) => "laptop keyboard (ps/2)".into(),
+        _ => "built-in keyboard".into(),
+    }
+}
+
 fn hide(mut d: DeviceInfo, why: &str) -> DeviceInfo {
     d.usable = false;
     d.hidden_reason = Some(why.to_string());
@@ -214,16 +258,14 @@ pub fn build_device_list(inp: &ScanInputs) -> Vec<DeviceInfo> {
         };
 
         for kind in kinds {
-            let (prefix, label, viewer) = match kind {
-                DeviceKind::Keyboard => ("kbd", "keyboard", Viewer::Keyboard),
-                _ => ("mouse", "mouse", Viewer::Mouse),
+            let (prefix, viewer) = match kind {
+                DeviceKind::Keyboard => ("kbd", Viewer::Keyboard),
+                _ => ("mouse", Viewer::Mouse),
             };
             // every interface of a merged device feeds it; the session logic ignores events it does not use
             let mine: Vec<&&RawDevice> = if split { members.iter().filter(|m| m.kind == kind).collect() } else { members.iter().collect() };
-            let name = product.clone().unwrap_or_else(|| match (vid, pid) {
-                (Some(_), Some(_)) => format!("generic {label}"),
-                _ => format!("system {label} (laptop, ps/2 or touchpad)"),
-            });
+            let paths: Vec<&str> = members.iter().filter(|m| m.kind == kind).map(|m| m.path.as_str()).collect();
+            let name = friendly_raw_name(kind, vid, pid, product.clone(), maker_for(&inp.hid, vid, pid), &paths);
             let mut d = DeviceInfo::base(format!("{prefix}-{}", fmt_id(vid, pid)), name, kind, viewer, &inp.raw_backend);
             d.vid = vid;
             d.pid = pid;
@@ -377,6 +419,38 @@ mod tests {
 
     fn visible(list: &[DeviceInfo]) -> Vec<&DeviceInfo> {
         list.iter().filter(|d| d.usable).collect()
+    }
+
+    #[test]
+    fn a_wireless_receiver_is_named_for_what_it_carries_not_usb_receiver() {
+        let mut i = inputs();
+        i.raw = vec![raw(1, DeviceKind::Mouse, Some(0x046d), Some(0xc539))];
+        let mut h = hid(0x046d, 0xc539, 1, 2, 0, "USB Receiver");
+        h.manufacturer = Some("Logitech".into());
+        i.hid = vec![h];
+        let list = build_device_list(&i);
+        assert_eq!(list[0].name, "Logitech wireless mouse (usb receiver)");
+    }
+
+    #[test]
+    fn a_real_product_name_is_kept() {
+        let mut i = inputs();
+        i.raw = vec![raw(1, DeviceKind::Mouse, Some(0x046d), Some(0xc08b))];
+        i.hid = vec![hid(0x046d, 0xc08b, 1, 2, 0, "G502 HERO Gaming Mouse")];
+        assert_eq!(build_device_list(&i)[0].name, "G502 HERO Gaming Mouse");
+    }
+
+    #[test]
+    fn laptop_pointing_devices_are_named_by_their_path() {
+        let mk = |path: &str, kind| RawDevice { src: 1, kind, path: path.into(), vid: None, pid: None };
+        let name = |d: RawDevice| {
+            let mut i = inputs();
+            i.raw = vec![d];
+            build_device_list(&i)[0].name.clone()
+        };
+        assert_eq!(name(mk(r"\\?\HID#ELAN0406&Col01#5&1#{a}", DeviceKind::Mouse)), "laptop touchpad");
+        assert_eq!(name(mk(r"\\?\ACPI#PNP0F13#4&1#{a}", DeviceKind::Mouse)), "ps/2 mouse");
+        assert_eq!(name(mk(r"\\?\ACPI#PNP0303#4&1#{a}", DeviceKind::Keyboard)), "laptop keyboard (ps/2)");
     }
 
     #[test]

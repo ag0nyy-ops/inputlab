@@ -32,6 +32,10 @@ function devices(): DeviceInfo[] {
     dev({ id: 'midi-5', name: 'sample midi keys', kind: 'midi', backend: 'midir' }),
     dev({ id: 'kbd-0006', name: 'sample analog keyboard', kind: 'keyboard', vid: 0x1234, pid: 0x0006, analogProfile: 'wooting', connected: !!q.get('analog') }),
   ];
+  if (q.get('laptop')) {
+    list.push(dev({ id: 'mouse-sys', name: 'laptop touchpad', kind: 'mouse', backend: 'rawinput' }));
+    list.push(dev({ id: 'mouse-046dc539', name: 'Logitech wireless mouse (usb receiver)', kind: 'mouse', vid: 0x046d, pid: 0xc539, backend: 'rawinput' }));
+  }
   if (q.get('hidden')) {
     list.push(dev({ id: 'hid-v1', name: 'virtual input device', kind: 'keyboard', usable: false, hiddenReason: 'a virtual input device windows creates (remote desktop, hyper-v, converted hid)', backend: 'rawinput' }));
     list.push(dev({ id: 'hid-v2', name: 'hid device 1532:00aa', kind: 'hid', backend: 'hidapi', usable: false, hiddenReason: 'only vendor-defined or system-control interfaces: a configuration channel, not an input' }));

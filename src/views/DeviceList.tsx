@@ -3,6 +3,8 @@ import { getBridge } from '../lib/bridge';
 import { backendLabel, caseNo, kindLabel, vidpid } from '../lib/format';
 import { setState, useStore } from '../lib/store';
 import { Stamp } from '../components/Stamp';
+import { deviceTitle, usePick } from '../models/pick';
+import type { DeviceInfo } from '../lib/types';
 
 export function DeviceList() {
   const devices = useStore((s) => s.devices);
@@ -30,18 +32,7 @@ export function DeviceList() {
           </li>
         )}
         {shown.map((d, i) => (
-          <li key={d.id}>
-            <button className={`case ${d.connected ? '' : 'case--gone'} ${d.usable ? '' : 'case--hidden'}`} aria-pressed={selectedId === d.id} onClick={() => setState({ selectedId: d.id, screen: 'home' })}>
-              <span className="label case__no">{caseNo(i)} / {kindLabel[d.kind]}</span>
-              <span className="case__name">{d.name}</span>
-              <span className="case__sub">
-                {vidpid(d.vid, d.pid)} · {backendLabel(d.backend)}
-              </span>
-              <span className="case__stamp">
-                {!d.usable ? <Stamp size="sm" tone="wip">interface</Stamp> : d.connected ? <Stamp size="sm">live</Stamp> : <Stamp size="sm" tone="wip">unplugged</Stamp>}
-              </span>
-            </button>
-          </li>
+          <CaseRow key={d.id} d={d} i={i} selected={selectedId === d.id} />
         ))}
         {hiddenCount > 0 && (
           <li>
@@ -53,5 +44,23 @@ export function DeviceList() {
         )}
       </ul>
     </aside>
+  );
+}
+
+function CaseRow({ d, i, selected }: { d: DeviceInfo; i: number; selected: boolean }) {
+  const picked = usePick(d);
+  return (
+    <li>
+      <button className={`case ${d.connected ? '' : 'case--gone'} ${d.usable ? '' : 'case--hidden'}`} aria-pressed={selected} onClick={() => setState({ selectedId: d.id, screen: 'home' })}>
+        <span className="label case__no">{caseNo(i)} / {kindLabel[d.kind]}</span>
+        <span className="case__name">{deviceTitle(d, picked)}</span>
+        <span className="case__sub">
+          {vidpid(d.vid, d.pid)} · {backendLabel(d.backend)}
+        </span>
+        <span className="case__stamp">
+          {!d.usable ? <Stamp size="sm" tone="wip">interface</Stamp> : d.connected ? <Stamp size="sm">live</Stamp> : <Stamp size="sm" tone="wip">unplugged</Stamp>}
+        </span>
+      </button>
+    </li>
   );
 }

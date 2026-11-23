@@ -4,7 +4,7 @@
 // product renders: the point is that a g305 and a superlight do not look the same.
 // the buttons are clipped to the body, so adding a shape is one path plus a few numbers.
 
-export type ShapeId = 'sym-pear' | 'ambi-slim' | 'ambi-wide' | 'ergo-right' | 'ergo-large' | 'generic';
+export type ShapeId = 'sym-pear' | 'ambi-slim' | 'ambi-wide' | 'ergo-right' | 'ergo-large' | 'touchpad' | 'generic';
 
 export interface Box {
   x: number;
@@ -23,6 +23,10 @@ export interface MouseShape {
   wheel: Box;
   /** side buttons: 5 = forward, 4 = back */
   sides: { n: 4 | 5; box: Box }[];
+  /** where the click buttons are: above the split (a mouse) or below it (a touchpad) */
+  zone?: 'top' | 'bottom';
+  /** x of the line between left and right click, when it is not the wheel's centre */
+  gutter?: number;
   /** non-input decoration: thumb shelf, dpi button... drawn as a faint outline */
   extras?: Box[];
 }
@@ -70,6 +74,17 @@ export const SHAPES: Record<ShapeId, MouseShape> = {
     wheel: { x: 88, y: 56, w: 16, h: 46 },
     sides: [{ n: 5, box: { x: 30, y: 160, w: 15, h: 32 } }, { n: 4, box: { x: 30, y: 198, w: 15, h: 32 } }],
     extras: [{ x: 28, y: 236, w: 24, h: 34 }],
+  },
+  touchpad: {
+    id: 'touchpad',
+    name: 'laptop touchpad',
+    body: 'M24 96 H176 V236 H24 Z',
+    split: 196,
+    zone: 'bottom',
+    gutter: 100,
+    // two-finger scroll shows up as wheel events: a strip down the right edge
+    wheel: { x: 164, y: 104, w: 8, h: 84 },
+    sides: [],
   },
   generic: {
     id: 'generic',

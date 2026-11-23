@@ -60,4 +60,16 @@ describe('mouse models', () => {
   it('a stale pick for a model that no longer exists is ignored', () => {
     expect(matchMouse(d('Some Office Mouse'), 'gone').confidence).toBe('none');
   });
+
+  it('a laptop touchpad gets its own shape', () => {
+    const m = matchMouse(d('laptop touchpad'));
+    expect(m.model?.id).toBe('laptop-touchpad');
+    expect(m.shape).toBe('touchpad');
+  });
+
+  it('a renamed wireless receiver is still recognised as shared', () => {
+    const m = matchMouse(d('Logitech wireless mouse (usb receiver)', 0x046d, 0xc539));
+    expect(m.confidence).toBe('ambiguous');
+    expect(m.receiver).toBe(true);
+  });
 });

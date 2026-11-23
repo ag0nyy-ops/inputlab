@@ -17,6 +17,8 @@ export interface MouseModel {
 }
 
 export const MICE: MouseModel[] = [
+  // built in
+  { id: 'laptop-touchpad', vendor: 'laptop', name: 'laptop touchpad', shape: 'touchpad', match: /touchpad|trackpad|precision/i },
   // logitech
   { id: 'logi-g305', vendor: 'logitech', name: 'G305 lightspeed', shape: 'sym-pear', match: /\bg\s?305\b/i },
   { id: 'logi-g-pro-wireless', vendor: 'logitech', name: 'G Pro wireless', shape: 'ambi-slim', match: /\bg\s?pro\b(?!.*\b(x|superlight)\b)/i },

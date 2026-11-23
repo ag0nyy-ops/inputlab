@@ -9,6 +9,7 @@ import { endMessages } from '../lib/messages';
 import { startSession } from '../lib/session';
 import { useSettings } from '../lib/settings';
 import { selectedDevice, useStore } from '../lib/store';
+import { deviceTitle, usePick } from '../models/pick';
 import type { DeviceInfo } from '../lib/types';
 
 function Rules({ dev }: { dev: DeviceInfo }) {
@@ -40,6 +41,7 @@ function Rules({ dev }: { dev: DeviceInfo }) {
 
 export function DevicePanel() {
   const dev = useStore(selectedDevice);
+  const picked = usePick(dev ?? { id: '', vid: null, pid: null });
   const info = useStore((s) => s.info);
   const lastEnd = useStore((s) => s.lastEnd);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +90,7 @@ export function DevicePanel() {
       {noticeEl}
       <header className="file">
         <p className="label file__no">{kindLabel[dev.kind]}</p>
-        <h1 className="title" style={{ marginTop: '.5rem' }}>{dev.name}</h1>
+        <h1 className="title" style={{ marginTop: '.5rem' }}>{deviceTitle(dev, picked)}</h1>
         <div className="rule" />
       </header>
 
