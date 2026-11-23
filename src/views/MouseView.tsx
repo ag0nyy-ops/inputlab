@@ -322,6 +322,9 @@ export function MouseView({ info }: { info: SessionInfo }) {
                 ))}
               </tbody>
             </table>
+            {clicks.length > 0 && clicks.slice(3).every((b) => b.clicks === 0) && (
+              <p className="case__sub">buttons 4 and 5 (the side buttons) never registered? remapping software (logitech g hub, razer synapse, steelseries gg) turns a button into a macro or a keystroke before windows sees it, so inputlab cannot see it either. while testing, set those buttons back to their defaults, or put the mouse in onboard-memory mode. the capture line in the footer counts keystrokes sent by software, which rises when a macro button fires.</p>
+            )}
             <p className="case__sub">chatter is a release-then-press faster than a hand can click: a worn switch firing twice. true click latency needs a light sensor, so this measures hold time and bounce, which is what shows a failing switch. double-click a button quickly and slowly to see both.</p>
           </div>
         )}

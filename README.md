@@ -124,6 +124,10 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 
 the rust tests cover the exit rules (including the combo from a second keyboard and the controller-never-exits rule), the threaded engine against a fake platform that records every capture and release call, polling math from 125 hz to 8000 hz, the dpi and sensor math, the hid descriptor parser, and the device merge logic. the ui checks run in a browser against a development-only mock backend (`?empty=1`, `?state=offline`, `?many=1`, `?nocapture=1`, `?analog=1`), which never ships in release builds.
 
+### buttons turned into macros
+
+mouse software (logitech g hub, razer synapse, steelseries gg and similar) can remap a button into a macro or a keystroke before windows sees it. a remapped button never reaches inputlab as a button, because inputlab reads what windows receives. to test a button, set it back to its default while you test, or switch the mouse to onboard memory. the capture line on the session screen counts keystrokes sent by software, so you can see a macro fire.
+
 ### what needs real hardware
 
 these cannot be proven from a code review or a container. if you have the hardware, please check:

@@ -37,6 +37,7 @@ if the window loses focus, the ui stops answering, or the app crashes, everythin
 - if windows ever stops delivering raw input to the app, keys and clicks are read from the system hooks instead and a banner says so, so the exit keys keep working. movement and polling rate need raw input and will be missing in that case.
 - the windows lockdown (cursor clip, hooks, esc-hold, exit combo) compiles and its logic is unit tested, but it has not yet been run on a real machine by the author. use `--no-capture` first and report anything odd.
 - alt+tab and the windows key were seen leaking through the keyboard lock on one windows machine. keystrokes injected by software are now swallowed too, and the session screen shows a live line (keys seen, swallowed, from software) so a leak can be diagnosed. if a shortcut still gets through, that line says why.
+- buttons you have remapped to macros in logitech g hub, razer synapse or similar do not register: the software swallows them before windows sees them. test with default button assignments.
 - steam interferes with playstation pads (it grabs the ps button and can show the pad as an xbox one): close steam while testing.
 - not checked on real hardware: 4k and 8k mice, analog keyboards (the wooting report format is unverified), specific controllers, rumble and battery.
 - ctrl+alt+del, win+l and other os-reserved combos cannot be captured. the keyboard view lists them as reserved.
