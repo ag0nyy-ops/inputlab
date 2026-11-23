@@ -91,6 +91,13 @@
   .gv__bar span { display: block; height: 6px; background: var(--fg); }
   .range { width: min(22rem, 100%); accent-color: var(--fg); min-height: 28px; }
   @media (max-width: 900px) { .gv { grid-template-columns: 1fr; } }
+  .pe__motion { display: flex; gap: 1.2rem; align-items: start; flex-wrap: wrap; margin-top: .6rem; }
+  .pe__bars { display: grid; grid-template-columns: auto 1fr; gap: .3rem .7rem; align-items: center; margin: .6rem 0; }
+  .pe__bar { display: block; height: .7rem; border: 1px solid var(--line-strong); background: #000; }
+  .pe__bar > span { display: block; height: 100%; width: 0; background: #fff; }
+  .pe__group { border: 0; padding: 0; margin: .8rem 0; min-width: 0; }
+  .pe__group:disabled { opacity: .4; }
+  .pe--off { opacity: .55; }
 }
 
 @layer components {

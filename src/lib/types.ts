@@ -103,7 +103,8 @@ export type Ev =
   | { t: 'analog'; keys: [string, number][] }
   | { t: 'midi'; kind: string; channel: number; a: number; b: number; value: number; ts: number; text: string }
   | { t: 'pad'; items: PadItem[] }
-  | { t: 'padInfo'; forceFeedback: boolean; power: string; battery: number | null; pollSource: string }
+  | { t: 'padInfo'; forceFeedback: boolean; power: string; battery: number | null; pollSource: string; bus: string; hidPad: string }
+  | { t: 'motion'; gyro: [number, number, number]; accel: [number, number, number] }
   | { t: 'sticks'; left: StickSnap; right: StickSnap; rest: RestSnap }
   | { t: 'notice'; text: string }
   | { t: 'capture'; text: string }
@@ -214,6 +215,8 @@ export type SessionCommand =
   | { type: 'padCircleStop' }
   | { type: 'padCircleReset' }
   | { type: 'padRestStart'; secs: number }
+  | { type: 'padTrigger'; right: boolean; start: number; force: number }
+  | { type: 'padAudio'; speaker: number; mic: number }
   | { type: 'padRumble'; strong: number; weak: number; ms: number };
 
 export interface KeyLabels {

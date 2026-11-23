@@ -2,11 +2,12 @@
 // the controller: a diagram that lights per button (analog triggers fill by how far
 // they are pulled), live stick dots, and the tests: circularity, drift, polling,
 // rumble, plus a raw table of every control the pad reports.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Eye } from '../components/Eye';
 import { HexDump, type HexDumpHandle } from '../components/HexDump';
 import { StickGaze } from '../lib/stickGaze';
 import { Stamp } from '../components/Stamp';
+import { PadExtras } from './PadExtras';
 import { FG, LINE, LINE_STRONG, MONO, MUTED, fitCanvas } from '../lib/draw';
 import { addFrame } from '../lib/raf';
 import { results } from '../lib/results';
@@ -16,7 +17,7 @@ import { drawPad, PAD_H, PAD_W } from '../models/drawPad';
 import { matchPad } from '../models/pads';
 import { getPick } from '../models/pick';
 
-type Tab = 'sticks' | 'polling' | 'rumble' | 'raw';
+type Tab = 'sticks' | 'polling' | 'rumble' | 'extras' | 'raw';
 const GLOW = 110;
 
 export function GamepadView({ info }: { info: SessionInfo }) {
@@ -24,10 +25,11 @@ export function GamepadView({ info }: { info: SessionInfo }) {
   const [tab, setTab] = useState<Tab>(match.style === 'generic' ? 'raw' : 'sticks');
   const [poll, setPoll] = useState<PollSnap | null>(null);
   const [sticks, setSticks] = useState<{ left: StickSnap; right: StickSnap; rest: RestSnap } | null>(null);
-  const [padInfo, setPadInfo] = useState<{ forceFeedback: boolean; power: string; battery: number | null; pollSource: string } | null>(null);
+  const [padInfo, setPadInfo] = useState<{ forceFeedback: boolean; power: string; battery: number | null; pollSource: string; bus: string; hidPad: string } | null>(null);
   const [raw, setRaw] = useState<PadItem[]>([]);
   const [hasHid, setHasHid] = useState(false);
   const dump = useRef<HexDumpHandle>(null);
+  const getVal = useCallback((n: string) => vals.current.get(n) ?? 0, []);
   const [strong, setStrong] = useState(0.7);
   const [weak, setWeak] = useState(0.7);
 
@@ -138,7 +140,7 @@ export function GamepadView({ info }: { info: SessionInfo }) {
   const f0 = (n: number | null | undefined) => (n == null ? '-' : Math.round(n).toLocaleString());
   const pct = (n: number | null | undefined) => (n == null ? '-' : `${Math.round(n * 100)}%`);
   const running = sticks?.left.active || sticks?.right.active;
-  const TABS: [Tab, string][] = [['sticks', 'sticks'], ['polling', 'polling'], ['rumble', 'rumble + battery'], ['raw', 'raw table']];
+  const TABS: [Tab, string][] = [['sticks', 'sticks'], ['polling', 'polling'], ['rumble', 'rumble + battery'], ...(padInfo?.hidPad ? ([['extras', 'motion + audio']] as [Tab, string][]) : []), ['raw', 'raw table']];
 
   return (
     <div className="gv">
@@ -247,8 +249,11 @@ export function GamepadView({ info }: { info: SessionInfo }) {
               {padInfo?.battery != null && <span className="num">{padInfo.battery}%</span>}
             </p>
             <p className="case__sub">{padInfo?.power === 'unknown' ? 'the driver does not expose battery state for this pad.' : 'as reported by the os. wired pads report no level.'}</p>
+            {!padInfo?.hidPad && <p className="case__sub">gyro, adaptive triggers and the controller's own speaker and microphone are playstation features, read straight from hid. xbox pads have none of them: the series pads have no gyro and no adjustable trigger resistance, and windows only offers plain rumble for them here.</p>}
           </div>
         )}
+
+        {tab === 'extras' && padInfo?.hidPad && <PadExtras bus={padInfo.bus} hidPad={padInfo.hidPad} get={getVal} />}
 
         {tab === 'raw' && (
           <div className="gv__body">

@@ -1,6 +1,7 @@
 // inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 import { describe, expect, it } from 'vitest';
 import { PADS, matchPad } from './pads';
+import { DUALSENSE_GLYPH } from './dualsenseGlyph';
 import { BODIES, padElements } from './padLayouts';
 
 const d = (name: string, vid: number | null = null, pid: number | null = null) => ({ name, vid, pid });
@@ -48,11 +49,11 @@ describe('controller layouts', () => {
     expect(at('xbox', 'A').names).toEqual(['South']);
     expect(at('switch', 'A').names).toEqual(['East']);
   });
-  it('dualsense has a live touchpad and mute button, a dualshock 3 has neither', () => {
-    const has = (id: string, name: string) => padElements('playstation', PADS.find((p) => p.id === id)!).some((e) => 'names' in e && e.names.includes(name));
-    expect(has('dualsense', 'Touchpad')).toBe(true);
-    expect(has('dualsense', 'Mute')).toBe(true);
-    expect(has('dualshock3', 'Touchpad')).toBe(false);
+  it('the dualsense uses the real outline, with a touchpad and a mute button the others lack', () => {
+    expect(DUALSENSE_GLYPH).toHaveLength(23);
+    expect(DUALSENSE_GLYPH.every((d) => d.startsWith('M'))).toBe(true);
+    expect(PADS.find((p) => p.id === 'dualsense')).toMatchObject({ touchpad: true, mute: true, body: 'ps5' });
+    expect(PADS.find((p) => p.id === 'dualshock3')?.touchpad).toBeFalsy();
   });
   it('the dualsense and the dualshock 4 are drawn differently', () => {
     const a = matchPad({ name: 'x', vid: 0x054c, pid: 0x0ce6 });
@@ -61,6 +62,7 @@ describe('controller layouts', () => {
     expect(b.body).toBe('ps');
   });
   it('every body outline exists', () => {
-    for (const p of PADS) expect(BODIES[p.body]).toBeTruthy();
+    // the dualsense is drawn from its own outline, everything else from a body path
+    for (const p of PADS.filter((x) => x.body !== 'ps5')) expect(BODIES[p.body]).toBeTruthy();
   });
 });

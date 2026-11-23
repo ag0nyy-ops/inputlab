@@ -202,6 +202,96 @@ pub fn rumble_report(kind: HidPad, bluetooth: bool, strong: f32, weak: f32) -> O
     }
 }
 
+
+/// the motion sensors, raw 16-bit readings. gyro order is pitch, yaw, roll as the pad sends it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Motion {
+    pub gyro: [i16; 3],
+    pub accel: [i16; 3],
+}
+
+fn le16(d: &[u8], at: usize) -> i16 {
+    i16::from_le_bytes([d[at], d[at + 1]])
+}
+
+/// gyro and accelerometer from an input report. the dualsense and dualshock 4 both carry them in
+/// their full reports; the short bluetooth "simple" report has none.
+pub fn motion(kind: HidPad, bluetooth: bool, report: &[u8]) -> Option<Motion> {
+    let id = *report.first()?;
+    let (d, gyro_at, accel_at) = match kind {
+        HidPad::DualSense => match id {
+            0x01 if !bluetooth && report.len() >= 28 => (&report[1..], 15, 21),
+            0x31 if report.len() >= 29 => (&report[2..], 15, 21),
+            _ => return None,
+        },
+        HidPad::DualShock4 => match id {
+            0x01 if !bluetooth && report.len() >= 25 => (&report[1..], 12, 18),
+            0x11 if report.len() >= 27 => (&report[3..], 12, 18),
+            _ => return None,
+        },
+    };
+    Some(Motion {
+        gyro: [le16(d, gyro_at), le16(d, gyro_at + 2), le16(d, gyro_at + 4)],
+        accel: [le16(d, accel_at), le16(d, accel_at + 2), le16(d, accel_at + 4)],
+    })
+}
+
+/// a dualsense output report with the given valid-flag bits and a writer for its payload. the usb
+/// layout starts the payload at byte 1; bluetooth moves everything two bytes along and adds a crc.
+fn ds5_output(bluetooth: bool, flag0: u8, fill: impl Fn(&mut dyn FnMut(usize, u8))) -> Vec<u8> {
+    if bluetooth {
+        let mut r = vec![0u8; 78];
+        r[0] = 0x31;
+        r[1] = (SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) & 0x0F) << 4;
+        r[2] = 0x10;
+        r[3] = flag0;
+        fill(&mut |i, v| r[i + 2] = v);
+        with_bt_crc(r)
+    } else {
+        let mut r = vec![0u8; 48];
+        r[0] = 0x02;
+        r[1] = flag0;
+        fill(&mut |i, v| r[i] = v);
+        r
+    }
+}
+
+/// adaptive trigger: `Some((start, force))` makes the trigger push back from `start` (0..1 of its
+/// travel) with `force` (0..1); `None` switches the effect off. dualsense only.
+pub fn trigger_report(kind: HidPad, bluetooth: bool, right: bool, effect: Option<(f32, f32)>) -> Option<Vec<u8>> {
+    if kind != HidPad::DualSense {
+        return None;
+    }
+    let base = if right { 11 } else { 22 };
+    let flag = if right { 0x04 } else { 0x08 };
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Some(ds5_output(bluetooth, flag, |w| match effect {
+        Some((start, force)) => {
+            w(base, 0x01); // continuous resistance
+            w(base + 1, byte(start));
+            w(base + 2, byte(force));
+        }
+        None => w(base, 0x00),
+    }))
+}
+
+/// speaker and microphone levels (0..1) for the controller's own audio, sent so the usb audio
+/// device is audible. usb only: the controller has no audio over bluetooth.
+pub fn audio_report(kind: HidPad, bluetooth: bool, speaker: f32, mic: f32) -> Option<Vec<u8>> {
+    if kind != HidPad::DualSense || bluetooth {
+        return None;
+    }
+    // the speaker only does anything between about 0x3d and 0x64
+    let sp = if speaker <= 0.0 { 0 } else { (0x3d as f32 + speaker.clamp(0.0, 1.0) * (0x64 - 0x3d) as f32) as u8 };
+    let mc = (mic.clamp(0.0, 1.0) * 255.0) as u8;
+    Some(ds5_output(false, 0xF0, |w| {
+        w(5, sp); // headphone volume follows the speaker
+        w(6, sp);
+        w(7, mc);
+        w(8, 0x30); // route audio to the speaker
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,5 +472,56 @@ mod tests {
         assert!(decode(HidPad::DualSense, false, &[0x01, 1, 2]).is_none());
         assert!(decode(HidPad::DualSense, false, &[0x77; 64]).is_none());
         assert!(decode(HidPad::DualShock4, false, &[0x01; 4]).is_none());
+    }
+
+    #[test]
+    fn motion_is_read_from_the_dualsense_and_dualshock_reports() {
+        let mut r = vec![0u8; 64];
+        r[0] = 0x01;
+        r[16..18].copy_from_slice(&(-1234i16).to_le_bytes()); // gyro pitch
+        r[20..22].copy_from_slice(&500i16.to_le_bytes()); // gyro roll
+        r[22..24].copy_from_slice(&100i16.to_le_bytes()); // accel x
+        r[26..28].copy_from_slice(&8192i16.to_le_bytes()); // accel z
+        let m = motion(HidPad::DualSense, false, &r).unwrap();
+        assert_eq!((m.gyro, m.accel), ([-1234, 0, 500], [100, 0, 8192]));
+        // bluetooth full report: everything one byte further
+        let mut bt = vec![0u8; 78];
+        bt[0] = 0x31;
+        bt[17..19].copy_from_slice(&(-1234i16).to_le_bytes());
+        assert_eq!(motion(HidPad::DualSense, true, &bt).unwrap().gyro[0], -1234);
+        // the short bluetooth report and short buffers have none
+        assert!(motion(HidPad::DualSense, true, &r).is_none());
+        assert!(motion(HidPad::DualSense, false, &r[..20]).is_none());
+        let mut d4 = vec![0u8; 64];
+        d4[0] = 0x01;
+        d4[13..15].copy_from_slice(&777i16.to_le_bytes());
+        d4[19..21].copy_from_slice(&(-8000i16).to_le_bytes());
+        let m = motion(HidPad::DualShock4, false, &d4).unwrap();
+        assert_eq!((m.gyro[0], m.accel[0]), (777, -8000));
+    }
+
+    #[test]
+    fn trigger_reports_target_the_right_bytes_and_bluetooth_gets_a_crc() {
+        let r = trigger_report(HidPad::DualSense, false, true, Some((0.5, 1.0))).unwrap();
+        assert_eq!((r[0], r[1], r[11], r[12], r[13], r.len()), (0x02, 0x04, 0x01, 128, 255, 48));
+        let l = trigger_report(HidPad::DualSense, false, false, Some((0.0, 0.25))).unwrap();
+        assert_eq!((l[1], l[22], l[24]), (0x08, 0x01, 64));
+        let off = trigger_report(HidPad::DualSense, false, false, None).unwrap();
+        assert_eq!((off[1], off[22]), (0x08, 0x00));
+        let bt = trigger_report(HidPad::DualSense, true, true, Some((0.5, 1.0))).unwrap();
+        assert_eq!((bt[0], bt[3], bt[13], bt[15], bt.len()), (0x31, 0x04, 0x01, 255, 78));
+        let mut seeded = vec![0xA2u8];
+        seeded.extend_from_slice(&bt[..74]);
+        assert_eq!(u32::from_le_bytes([bt[74], bt[75], bt[76], bt[77]]), crc32(&seeded));
+        assert!(trigger_report(HidPad::DualShock4, false, true, None).is_none());
+    }
+
+    #[test]
+    fn audio_reports_set_the_levels_and_only_exist_over_usb() {
+        let r = audio_report(HidPad::DualSense, false, 1.0, 0.5).unwrap();
+        assert_eq!((r[0], r[1], r[6], r[7], r[8]), (0x02, 0xF0, 0x64, 127, 0x30));
+        assert_eq!(audio_report(HidPad::DualSense, false, 0.0, 0.0).unwrap()[6], 0);
+        assert!(audio_report(HidPad::DualSense, true, 1.0, 1.0).is_none());
+        assert!(audio_report(HidPad::DualShock4, false, 1.0, 1.0).is_none());
     }
 }

@@ -57,7 +57,9 @@ pub enum Ev {
     Clicks { buttons: Vec<ButtonStat> },
     Pad { items: Vec<PadItem> },
     /// static-ish facts about the pad: rumble support, battery, where the polling rate comes from
-    PadInfo { force_feedback: bool, power: String, battery: Option<u8>, poll_source: String },
+    PadInfo { force_feedback: bool, power: String, battery: Option<u8>, poll_source: String, bus: String, hid_pad: String },
+    /// gyro in degrees per second and accelerometer in g, as the pad reports them (uncalibrated)
+    Motion { gyro: [f32; 3], accel: [f32; 3] },
     Sticks { left: StickSnap, right: StickSnap, rest: RestSnap },
     /// the latest raw input report of a generic hid device (coalesced per frame).
     /// `changed` = byte indices that changed since the last frame, `n` = reports folded in.

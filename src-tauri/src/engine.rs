@@ -189,13 +189,26 @@ struct PadState {
     hid_last: std::collections::HashMap<&'static str, f32>,
     bluetooth: bool,
     hid_power: Option<(&'static str, Option<u8>)>,
+    last_motion: u64,
     /// raw report bytes for the pad's hex view (only used for pads read over hid)
     raw: HidState,
 }
 
+fn bus_name(bluetooth: bool) -> String {
+    if bluetooth { "bluetooth" } else { "usb" }.into()
+}
+
+fn hid_pad_name(k: crate::hid::pads::HidPad) -> String {
+    match k {
+        crate::hid::pads::HidPad::DualSense => "dualsense",
+        crate::hid::pads::HidPad::DualShock4 => "dualshock4",
+    }
+    .into()
+}
+
 impl PadState {
     fn new(pad: usize) -> Self {
-        Self { hid_kind: None, hid_last: Default::default(), bluetooth: false, hid_power: None, raw: HidState::new(None), pad, events: PollEstimator::new(), hid: PollEstimator::new(), hid_seen: false, left: StickTest::new(), right: StickTest::new(), rest: RestTest::new(), pending: vec![], last_snap: 0, last_reports: 0, idle_sent: true }
+        Self { hid_kind: None, hid_last: Default::default(), bluetooth: false, hid_power: None, last_motion: 0, raw: HidState::new(None), pad, events: PollEstimator::new(), hid: PollEstimator::new(), hid_seen: false, left: StickTest::new(), right: StickTest::new(), rest: RestTest::new(), pending: vec![], last_snap: 0, last_reports: 0, idle_sent: true }
     }
     fn poll(&self) -> &PollEstimator {
         if self.hid_seen { &self.hid } else { &self.events }
@@ -333,6 +346,20 @@ impl Session {
         Some((crate::hid::pads::rumble_report(k, p.bluetooth, strong, weak)?, crate::hid::pads::rumble_report(k, p.bluetooth, 0.0, 0.0)?))
     }
 
+    /// (effect on, effect off) output reports for one adaptive trigger
+    pub fn hid_trigger(&self, right: bool, start: f32, force: f32) -> Option<(Vec<u8>, Vec<u8>)> {
+        let p = self.pad.as_ref()?;
+        let k = p.hid_kind?;
+        let off = crate::hid::pads::trigger_report(k, p.bluetooth, right, None)?;
+        let on = if force > 0.0 { crate::hid::pads::trigger_report(k, p.bluetooth, right, Some((start, force)))? } else { off.clone() };
+        Some((on, off))
+    }
+
+    pub fn hid_audio(&self, speaker: f32, mic: f32) -> Option<Vec<u8>> {
+        let p = self.pad.as_ref()?;
+        crate::hid::pads::audio_report(p.hid_kind?, p.bluetooth, speaker, mic)
+    }
+
     pub fn pad_id(&self) -> Option<usize> {
         self.pad.as_ref().map(|p| p.pad)
     }
@@ -341,7 +368,7 @@ impl Session {
         let Some(p) = self.pad.as_mut() else { return };
         match msg {
             PadMsg::Status(s) if s.pad == p.pad => {
-                self.buf.push(Ev::PadInfo { force_feedback: s.force_feedback, power: s.power.clone(), battery: s.battery, poll_source: if p.hid_seen { "hid reports".into() } else { "events".into() } });
+                self.buf.push(Ev::PadInfo { force_feedback: s.force_feedback, power: s.power.clone(), battery: s.battery, poll_source: if p.hid_seen { "hid reports".into() } else { "events".into() }, bus: String::new(), hid_pad: String::new() });
             }
             PadMsg::Event(e) if e.pad == p.pad => {
                 p.events.push(e.ts);
@@ -404,7 +431,7 @@ impl Session {
                 p.hid_seen = true;
                 if let Some(k) = p.hid_kind {
                     let ff = crate::hid::pads::rumble_report(k, p.bluetooth, 0.0, 0.0).is_some();
-                    self.buf.push(Ev::PadInfo { force_feedback: ff, power: "unknown".into(), battery: None, poll_source: "hid reports".into() });
+                    self.buf.push(Ev::PadInfo { force_feedback: ff, power: "unknown".into(), battery: None, poll_source: "hid reports".into(), bus: bus_name(p.bluetooth), hid_pad: hid_pad_name(k) });
                 }
                 p.last_reports = 0; // switch the poll source cleanly
                 p.idle_sent = false;
@@ -418,7 +445,16 @@ impl Session {
                     if p.hid_power != Some(pw) {
                         p.hid_power = Some(pw);
                         let ff = crate::hid::pads::rumble_report(kind, p.bluetooth, 0.0, 0.0).is_some();
-                        self.buf.push(Ev::PadInfo { force_feedback: ff, power: pw.0.into(), battery: pw.1, poll_source: "hid reports".into() });
+                        self.buf.push(Ev::PadInfo { force_feedback: ff, power: pw.0.into(), battery: pw.1, poll_source: "hid reports".into(), bus: bus_name(p.bluetooth), hid_pad: hid_pad_name(kind) });
+                    }
+                }
+                // gyro and accelerometer, about 60 times a second is plenty for a readout
+                if r.ts.saturating_sub(p.last_motion) >= 16_000_000 {
+                    if let Some(m) = crate::hid::pads::motion(kind, p.bluetooth, &r.data) {
+                        p.last_motion = r.ts;
+                        let g = |v: i16| v as f32 / 16.4; // about +-2000 degrees per second full scale
+                        let a = |v: i16| v as f32 / 8192.0; // 8192 per g
+                        self.buf.push(Ev::Motion { gyro: [g(m.gyro[0]), g(m.gyro[1]), g(m.gyro[2])], accel: [a(m.accel[0]), a(m.accel[1]), a(m.accel[2])] });
                     }
                 }
                 if let Some(items) = crate::hid::pads::decode(kind, p.bluetooth, &r.data) {
@@ -620,6 +656,10 @@ pub enum SessionCommand {
     PadCircleReset,
     PadRestStart { secs: f32 },
     PadRumble { strong: f32, weak: f32, ms: u32 },
+    /// adaptive trigger resistance on a dualsense; force 0 switches it off
+    PadTrigger { right: bool, start: f32, force: f32 },
+    /// the controller's own speaker and microphone levels (usb dualsense)
+    PadAudio { speaker: f32, mic: f32 },
 }
 
 pub struct StartReq {
@@ -664,6 +704,8 @@ struct Live {
     last_stats_at: u64,
     /// a rumble command to send once its time is up (stops the motors)
     rumble_off: Option<(u64, Vec<u8>)>,
+    /// reports that put the adaptive triggers back to normal, sent when the session ends
+    trigger_off: Vec<Vec<u8>>,
 }
 
 pub fn channel() -> (Sender<EngineMsg>, Receiver<EngineMsg>) {
@@ -698,6 +740,14 @@ fn finish(live: &mut Option<Live>, platform: &Arc<dyn Platform>, active: &Atomic
         if let (Some((_, off)), Some(rd)) = (l.rumble_off.take(), l._reader.as_ref()) {
             rd.write(off);
             std::thread::sleep(Duration::from_millis(150)); // let the reader loop send it before it stops
+        }
+        if let Some(rd) = l._reader.as_ref() {
+            if !l.trigger_off.is_empty() {
+                for off in l.trigger_off.drain(..) {
+                    rd.write(off);
+                }
+                std::thread::sleep(Duration::from_millis(150));
+            }
         }
         l.session.push(Ev::Ended { reason });
         if let Some(f) = l.session.take_frame() {
@@ -829,7 +879,7 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                                 .ok();
                             }
                         }
-                        live = Some(Live { _reader: reader, _midi: midi_conn, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now, last_stats: String::new(), last_stats_at: 0, rumble_off: None });
+                        live = Some(Live { _reader: reader, _midi: midi_conn, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now, last_stats: String::new(), last_stats_at: 0, rumble_off: None, trigger_off: vec![] });
                         let _ = req.reply.send(Ok(info));
                     }
                     Err(e) => {
@@ -879,6 +929,19 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                             }
                         } else if let Some(pad) = l.session.pad_id() {
                             let _ = pads.send(PadCmd::Rumble { pad, strong, weak, ms });
+                        }
+                    }
+                    if let SessionCommand::PadTrigger { right, start, force } = cmd {
+                        if let (Some((on, off)), Some(rd)) = (l.session.hid_trigger(right, start, force), l._reader.as_ref()) {
+                            rd.write(on);
+                            if !l.trigger_off.contains(&off) {
+                                l.trigger_off.push(off);
+                            }
+                        }
+                    }
+                    if let SessionCommand::PadAudio { speaker, mic } = cmd {
+                        if let (Some(r), Some(rd)) = (l.session.hid_audio(speaker, mic), l._reader.as_ref()) {
+                            rd.write(r);
                         }
                     }
                     l.session.command(cmd, now);
@@ -1416,6 +1479,30 @@ mod tests {
         let f = s.take_frame().unwrap();
         assert!(f.events.iter().any(|e| matches!(e, Ev::Button { n: 1, down: true, .. })));
         assert!(f.events.iter().any(|e| matches!(e, Ev::Wheel { dy: 120, .. })));
+    }
+
+    #[test]
+    fn a_dualsense_reports_motion_and_which_bus_it_is_on() {
+        let mut d = dev(DeviceKind::Gamepad, Viewer::Gamepad, vec![]);
+        d.vid = Some(0x054c);
+        d.pid = Some(0x0ce6);
+        let mut s = Session::new(d, &SessionSettings::default(), T0);
+        let mut r = vec![0u8; 64];
+        r[0] = 1;
+        r[1..11].copy_from_slice(&[128, 128, 128, 128, 0, 0, 0, 0x08, 0, 0]);
+        r[16..18].copy_from_slice(&1640i16.to_le_bytes()); // 100 deg/s of pitch
+        r[26..28].copy_from_slice(&8192i16.to_le_bytes()); // 1 g on the third axis
+        s.on_hid(&HidReport { ts: T0, data: r.clone() });
+        let f = s.take_frame().unwrap();
+        let m = f.events.iter().find_map(|e| if let Ev::Motion { gyro, accel } = e { Some((*gyro, *accel)) } else { None }).expect("a motion event");
+        assert!((m.0[0] - 100.0).abs() < 0.01 && (m.1[2] - 1.0).abs() < 0.001);
+        assert!(f.events.iter().any(|e| matches!(e, Ev::PadInfo { bus, hid_pad, .. } if bus == "usb" && hid_pad == "dualsense")));
+        // throttled: another report right after adds no second reading
+        s.on_hid(&HidReport { ts: T0 + MS, data: r });
+        assert!(s.take_frame().is_none_or(|f| !f.events.iter().any(|e| matches!(e, Ev::Motion { .. }))));
+        // trigger and audio reports exist for it
+        assert!(s.hid_trigger(true, 0.5, 1.0).is_some());
+        assert!(s.hid_audio(0.5, 0.5).is_some());
     }
 
     #[test]

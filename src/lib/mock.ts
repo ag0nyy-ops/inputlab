@@ -140,7 +140,11 @@ export function mockBridge(): Bridge {
         return { t: 'sticks', left, right: mk(false), rest: { running: restUntil > performance.now(), secsLeft: Math.max(0, (restUntil - performance.now()) / 1000), entries: restAcc.length ? [{ name: 'left stick', meanX: 0.09, meanY: 0.01, offset: 0.09, noise: 0.012, drift: true }, { name: 'right stick', meanX: 0.002, meanY: 0, offset: 0.004, noise: 0.008, drift: false }] : [] } };
       };
       if (device.viewer === 'gamepad') {
-        buf.push({ t: 'padInfo', forceFeedback: true, power: 'discharging', battery: 72, pollSource: 'hid reports' });
+        const bus = new URLSearchParams(location.search).get('bus') ?? 'usb';
+        buf.push({ t: 'padInfo', forceFeedback: true, power: 'discharging', battery: 72, pollSource: 'hid reports', bus, hidPad: 'dualsense' });
+        // a pad lying a little off level, turning slowly
+        let ph = 0;
+        setInterval(() => { ph += 0.1; buf.push({ t: 'motion', gyro: [Math.sin(ph) * 4, Math.cos(ph * 0.7) * 3, Math.sin(ph * 0.4) * 2], accel: [0.05 + Math.sin(ph) * 0.2, Math.cos(ph) * 0.15, 0.98] }); }, 33);
         setInterval(() => { if (circ || restUntil) buf.push(sticksMsg()); }, 100);
       }
       cmdHandler = (c) => {

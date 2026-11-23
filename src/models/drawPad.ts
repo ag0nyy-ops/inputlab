@@ -1,5 +1,6 @@
 // inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 import { FG, LINE_STRONG, MONO, MUTED, legend, shade } from '../lib/draw';
+import { drawDualsense } from './drawDualsense';
 import { BODIES, padElements, type PadEl } from './padLayouts';
 import type { PadMatch } from './pads';
 
@@ -41,6 +42,12 @@ export function drawPad(ctx: CanvasRenderingContext2D, match: PadMatch, w: numbe
   const sc = w / PAD_W;
   ctx.save();
   ctx.scale(sc, sc);
+
+  if (match.body === 'ps5') {
+    drawDualsense(ctx, st);
+    ctx.restore();
+    return;
+  }
 
   const els = padElements(match.style, match.model);
 

@@ -85,6 +85,17 @@ on windows: make a shortcut to inputlab, right-click it, properties, and add ` -
 
 windows' game-controller layer does not expose dualsense and dualshock 4 pads, so inputlab reads their hid reports directly and decodes the sticks, triggers and buttons itself (usb and bluetooth). the report layouts are the publicly documented ones and are checked against hand-built reports, not yet against every real pad. battery is read from the report, and rumble works over usb and bluetooth (bluetooth output reports carry a checksum, which is implemented for the dualsense). a dualsense over bluetooth starts in a short report with no battery; inputlab asks it to switch to the full report. the controller's raw tab shows a live hex view, so a button that lights the wrong part of the drawing can be traced to a byte.
 
+### gyro, adaptive triggers, speaker, microphone and haptics
+
+the dualsense (and the dualshock 4, for the gyro) has more than buttons, and the controller test has a "motion + audio" tab for it:
+
+- **gyro and accelerometer**: read from the same hid reports. "zero" asks you to hold the pad still for a second, takes the gyro's resting offset and the direction of gravity as the reference, then shows turning, tipping and a ball that rolls to the low side. the values are scaled from the raw readings, not factory-calibrated, and the turn angle drifts like any gyro without a compass.
+- **adaptive triggers**: sets a resistance effect on l2 and r2 (where it starts pushing back, and how hard). dualsense only. the triggers go back to normal when the test ends.
+- **speaker, microphone and haptics**: a dualsense over a usb cable shows up to windows as an audio device, so the test can play a tone through its speaker, show a microphone level meter, record and play back a 3 s clip, and buzz the haptic motors (audio channels 3 and 4, which only works when windows exposes the device with four channels). over bluetooth the controller has no audio device, so these are greyed out with "connect via usb-c". the microphone is only read for the meter and an in-memory clip: nothing is saved or sent anywhere.
+- xbox pads have none of this: the series pads have no gyro and no adjustable trigger resistance.
+
+all of it is written from public documentation and checked against hand-built reports, not against a real pad yet.
+
 steam can interfere: its controller support grabs the ps button system-wide (it opens steam) and can present your pad as a virtual xbox controller. inputlab cannot block another app's hook, and a session ends when the window loses focus. close steam while you test.
 
 ## how accurate are the numbers
@@ -138,7 +149,7 @@ these cannot be proven from a code review or a container. if you have the hardwa
 
 - the windows lockdown end to end: esc-hold in a mouse session, the exit button and the combo in a keyboard session, alt+tab and the win key during a session, the window close button, and focus loss.
 - whether raw input still reports keys and clicks while the low-level hooks swallow them (the code detects the case where it does not and falls back to the hook as the key source, but it has not met a real machine).
-- 4k and 8k mice, analog keyboards (the wooting report format is written from memory and marked unverified), specific controllers (dualsense, switch pro, xinput pads), battery and rumble.
+- 4k and 8k mice, analog keyboards (the wooting report format is written from memory and marked unverified), specific controllers (dualsense, switch pro, xinput pads), battery and rumble, and the dualsense's gyro, adaptive trigger and audio features.
 
 ## adding things
 
@@ -183,5 +194,7 @@ there is no network code, no telemetry, no account. the webview's content securi
 ## fonts and licence
 
 the source is viewable, not reusable: you may read it, learn from it, run it and build your own app, but you may not copy the project or pieces of its code. the full terms are in [LICENSE](LICENSE). it is a custom licence, not an open-source one.
+
+the dualsense drawing is the "dualsense" icon from [svgrepo.com](https://www.svgrepo.com/svg/324525/dualsense), used as is and not part of this project's own work. its licence could not be read when it was added (the site was behind a bot check): check it on that page before shipping, and credit the author if it asks for that. the inputs light up on top of it in `src/models/drawDualsense.ts`.
 
 the ui uses UnifrakturMaguntia, IBM Plex Mono and IBM Plex Sans, self-hosted, under the SIL Open Font License 1.1. the licence texts are in `public/licenses/`.
