@@ -65,6 +65,8 @@ pub enum Ev {
     /// analog depth (0..1) of keys that changed. keys not listed did not change.
     Analog { keys: Vec<(String, f32)> },
     Midi { kind: String, channel: u8, a: u8, b: u8, value: i32, ts: f64, text: String },
+    /// live account of what the capture hooks are doing (diagnostics)
+    Capture { text: String },
     /// something the user should know about the session
     Notice { text: String },
     /// progress of an exit hold (0..1). sent whenever it changes.

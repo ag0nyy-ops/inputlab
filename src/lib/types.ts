@@ -106,6 +106,7 @@ export type Ev =
   | { t: 'padInfo'; forceFeedback: boolean; power: string; battery: number | null; pollSource: string }
   | { t: 'sticks'; left: StickSnap; right: StickSnap; rest: RestSnap }
   | { t: 'notice'; text: string }
+  | { t: 'capture'; text: string }
   | { t: 'exit'; kind: ExitKind; progress: number }
   | { t: 'reserved'; label: string }
   | { t: 'ended'; reason: EndReason };

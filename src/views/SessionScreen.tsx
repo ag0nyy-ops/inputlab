@@ -17,7 +17,8 @@ export function SessionScreen() {
   const s = useStore((st) => st.session);
   const pick = usePick(useStore((st) => st.session?.device) ?? { id: '', vid: null, pid: null });
   const [notices, setNotices] = useState<string[]>([]);
-  useEffect(() => onFrame((evs) => { for (const e of evs) if (e.t === 'notice') setNotices((n) => (n.includes(e.text) ? n : [...n, e.text])); }), []);
+  const [capText, setCapText] = useState('');
+  useEffect(() => onFrame((evs) => { for (const e of evs) { if (e.t === 'notice') setNotices((n) => (n.includes(e.text) ? n : [...n, e.text])); if (e.t === 'capture') setCapText(e.text); } }), []);
   const gone = useStore((st) => st.session !== null && st.devices.some((d) => d.id === st.session!.device.id && !d.connected));
 
   useEffect(() => {
@@ -94,6 +95,7 @@ export function SessionScreen() {
             </p>
           )}
           {s.mode === 'other' && <p className="label">controller and device buttons never exit. use the button.</p>}
+          {capText && <p className="case__sub num" aria-label="capture diagnostics">{capText}</p>}
         </div>
         {s.exit.button && (
           <button className="btn btn--solid btn--lg" onClick={() => void endSession()}>

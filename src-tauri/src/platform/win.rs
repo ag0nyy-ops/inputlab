@@ -46,6 +46,11 @@ static SINK: OnceLock<RawSink> = OnceLock::new();
 static THREAD_ID: AtomicU32 = AtomicU32::new(0);
 static KB_HOOK: AtomicIsize = AtomicIsize::new(0);
 static MS_HOOK: AtomicIsize = AtomicIsize::new(0);
+/// what the keyboard hook did, shown live on the session screen so a leak can be diagnosed
+static HOOK_SWALLOWED: AtomicU64 = AtomicU64::new(0);
+static HOOK_INJECTED: AtomicU64 = AtomicU64::new(0);
+static HOOK_UNFOCUSED: AtomicU64 = AtomicU64::new(0);
+static HOOK_CALLS: AtomicU64 = AtomicU64::new(0);
 static KB_ON: AtomicBool = AtomicBool::new(false);
 /// keyboard hook installed but not swallowing: a second key source that keeps the exit rules alive
 static KB_MONITOR: AtomicBool = AtomicBool::new(false);
@@ -259,31 +264,36 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 unsafe extern "system" fn ll_keyboard(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let swallow = KB_ON.load(Relaxed);
     if code >= 0 && (swallow || KB_MONITOR.load(Relaxed)) {
+        HOOK_CALLS.fetch_add(1, Relaxed);
         let info = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
-        let injected = info.flags.0 & 0x10 != 0;
-        if !injected {
-            if app_foreground() {
-                let seen = HOOK_KEYS_SEEN.fetch_add(1, Relaxed) + 1;
-                // raw input should have reported these keys too. if it saw none, it is blind:
-                // report keys from the hook instead, so the exit rules can never go deaf.
-                if RAW_KEYS_SEEN.load(Relaxed) == 0 && seen >= 4 && !HOOK_SOURCE.swap(true, Relaxed) {
-                    emit(RawEvent::RawBlind);
-                }
-                if HOOK_SOURCE.load(Relaxed) {
-                    let ext = info.flags.0 & 0x01 != 0;
-                    let up = info.flags.0 & 0x80 != 0;
-                    let scan = if ext { 0xE000 | info.scanCode as u16 } else { info.scanCode as u16 };
-                    let name = if info.vkCode == 0x13 { Some("Pause") } else { keys::from_set1(scan) };
-                    if let Some(c) = name {
-                        emit(RawEvent::Key { src: 0, code: c, down: !up, ts: ts() });
-                    }
-                }
-                if swallow {
-                    return LRESULT(1);
-                }
-            } else if swallow {
-                notify_focus_lost();
+        // keystrokes injected by software (macro tools, remote desktop, some keyboard drivers)
+        // are swallowed like any other: letting them through is a leak in a lockdown tester
+        if info.flags.0 & 0x10 != 0 {
+            HOOK_INJECTED.fetch_add(1, Relaxed);
+        }
+        if app_foreground() {
+            let seen = HOOK_KEYS_SEEN.fetch_add(1, Relaxed) + 1;
+            // raw input should have reported these keys too. if it saw none, it is blind:
+            // report keys from the hook instead, so the exit rules can never go deaf.
+            if RAW_KEYS_SEEN.load(Relaxed) == 0 && seen >= 4 && !HOOK_SOURCE.swap(true, Relaxed) {
+                emit(RawEvent::RawBlind);
             }
+            if HOOK_SOURCE.load(Relaxed) {
+                let ext = info.flags.0 & 0x01 != 0;
+                let up = info.flags.0 & 0x80 != 0;
+                let scan = if ext { 0xE000 | info.scanCode as u16 } else { info.scanCode as u16 };
+                let name = if info.vkCode == 0x13 { Some("Pause") } else { keys::from_set1(scan) };
+                if let Some(c) = name {
+                    emit(RawEvent::Key { src: 0, code: c, down: !up, ts: ts() });
+                }
+            }
+            if swallow {
+                HOOK_SWALLOWED.fetch_add(1, Relaxed);
+                return LRESULT(1);
+            }
+        } else if swallow {
+            HOOK_UNFOCUSED.fetch_add(1, Relaxed);
+            notify_focus_lost();
         }
     }
     CallNextHookEx(None, code, wparam, lparam)
@@ -341,6 +351,10 @@ unsafe fn clip_to_window(hwnd: HWND) -> bool {
 unsafe fn arm(spec: &CaptureSpec) -> CaptureReport {
     release_all();
     HOOK_KEYS_SEEN.store(0, SeqCst);
+    HOOK_SWALLOWED.store(0, SeqCst);
+    HOOK_INJECTED.store(0, SeqCst);
+    HOOK_UNFOCUSED.store(0, SeqCst);
+    HOOK_CALLS.store(0, SeqCst);
     RAW_KEYS_SEEN.store(0, SeqCst);
     HOOK_SOURCE.store(false, SeqCst);
     RAW_MOUSE_SEEN.store(0, SeqCst);
@@ -544,6 +558,29 @@ impl Platform for WindowsPlatform {
 
     fn is_app_foreground(&self) -> bool {
         unsafe { app_foreground() }
+    }
+
+    fn capture_stats(&self) -> Option<String> {
+        let kb = KB_HOOK.load(Relaxed) != 0;
+        let ms = MS_HOOK.load(Relaxed) != 0;
+        if !kb && !ms {
+            return None;
+        }
+        let mut parts = vec![];
+        if kb {
+            parts.push(format!(
+                "keyboard hook {} · {} keys seen · {} swallowed · {} from software · {} while unfocused",
+                if KB_ON.load(Relaxed) { "swallowing" } else { "watching only" },
+                HOOK_CALLS.load(Relaxed),
+                HOOK_SWALLOWED.load(Relaxed),
+                HOOK_INJECTED.load(Relaxed),
+                HOOK_UNFOCUSED.load(Relaxed)
+            ));
+        }
+        if ms {
+            parts.push("mouse hook installed".into());
+        }
+        Some(parts.join(" · "))
     }
 
     fn refresh_capture(&self) {

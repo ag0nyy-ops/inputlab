@@ -634,6 +634,7 @@ struct Live {
     last_flush: u64,
     last_focus_check: u64,
     last_refresh: u64,
+    last_stats: String,
 }
 
 pub fn channel() -> (Sender<EngineMsg>, Receiver<EngineMsg>) {
@@ -779,7 +780,7 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                                 reader = HidReader::open(path, move |r| { let _ = t.send(EngineMsg::Hid(r)); }).ok();
                             }
                         }
-                        live = Some(Live { _reader: reader, _midi: midi_conn, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now });
+                        live = Some(Live { _reader: reader, _midi: midi_conn, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now, last_stats: String::new() });
                         let _ = req.reply.send(Ok(info));
                     }
                     Err(e) => {
@@ -861,6 +862,12 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
             if now.saturating_sub(l.last_refresh) >= REFRESH_CAPTURE_EVERY {
                 l.last_refresh = now;
                 platform.refresh_capture();
+                if let Some(t) = platform.capture_stats() {
+                    if t != l.last_stats {
+                        l.last_stats = t.clone();
+                        l.session.push(Ev::Capture { text: t });
+                    }
+                }
             }
             if end.is_none() && now.saturating_sub(l.last_flush) >= FLUSH_EVERY && l.session.has_pending() {
                 l.last_flush = now;
