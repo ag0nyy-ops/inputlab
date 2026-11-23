@@ -20,7 +20,7 @@ use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows::Win32::System::Threading::{
-    GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
+    GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST, THREAD_PRIORITY_TIME_CRITICAL,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyboardLayout, GetKeyboardLayoutNameW, MapVirtualKeyExW, SendInput, ToUnicodeEx, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
@@ -132,14 +132,20 @@ unsafe fn app_foreground() -> bool {
     pid == OUR_PID.load(Relaxed)
 }
 
-/// first hook callback that finds us unfocused: stop swallowing right now and tell the engine.
-unsafe fn notify_focus_lost() {
-    KB_ON.store(false, SeqCst);
-    MS_ON.store(false, SeqCst);
-    let _ = ClipCursor(None);
+/// tell the engine we are not foreground (once per loss). the engine ends the session after its grace.
+unsafe fn emit_focus_lost() {
     if !FOCUS_SENT.swap(true, SeqCst) {
         emit(RawEvent::FocusLost { ts: ts() });
     }
+}
+
+/// mouse hook found us unfocused: free the cursor right now and tell the engine.
+/// the keyboard hook never switches itself off: it decides per key, so a focus flicker while
+/// the capture is arming cannot leave shortcuts unblocked for the rest of the session.
+unsafe fn notify_focus_lost() {
+    MS_ON.store(false, SeqCst);
+    let _ = ClipCursor(None);
+    emit_focus_lost();
 }
 
 // ------------------------------------------------------------------ raw input
@@ -277,7 +283,10 @@ unsafe extern "system" fn ll_keyboard(code: i32, wparam: WPARAM, lparam: LPARAM)
         if info.flags.0 & 0x10 != 0 {
             HOOK_INJECTED.fetch_add(1, Relaxed);
         }
+        // our own self-test key is not a real key press: it must never count as "unfocused"
+        let selftest_key = info.flags.0 & 0x10 != 0 && info.vkCode == 0x87;
         if app_foreground() {
+            FOCUS_SENT.store(false, Relaxed);
             let seen = HOOK_KEYS_SEEN.fetch_add(1, Relaxed) + 1;
             // raw input should have reported these keys too. if it saw none, it is blind:
             // report keys from the hook instead, so the exit rules can never go deaf.
@@ -297,9 +306,9 @@ unsafe extern "system" fn ll_keyboard(code: i32, wparam: WPARAM, lparam: LPARAM)
                 HOOK_SWALLOWED.fetch_add(1, Relaxed);
                 return LRESULT(1);
             }
-        } else if swallow {
+        } else if swallow && !selftest_key {
             HOOK_UNFOCUSED.fetch_add(1, Relaxed);
-            notify_focus_lost();
+            emit_focus_lost();
         }
     }
     CallNextHookEx(None, code, wparam, lparam)
@@ -478,7 +487,11 @@ unsafe fn hook_thread() {
 
 fn ensure_hook_thread() {
     HOOK_THREAD.call_once(|| {
-        let _ = std::thread::Builder::new().name("inputlab-hooks".into()).spawn(|| unsafe { hook_thread() });
+        let _ = std::thread::Builder::new().name("inputlab-hooks".into()).spawn(|| unsafe {
+            // windows skips a hook that answers too slowly: never let this thread get starved
+            let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+            hook_thread()
+        });
     });
 }
 

@@ -661,6 +661,7 @@ struct Live {
     last_focus_check: u64,
     last_refresh: u64,
     last_stats: String,
+    last_stats_at: u64,
     /// a rumble command to send once its time is up (stops the motors)
     rumble_off: Option<(u64, Vec<u8>)>,
 }
@@ -828,7 +829,7 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                                 .ok();
                             }
                         }
-                        live = Some(Live { _reader: reader, _midi: midi_conn, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now, last_stats: String::new(), rumble_off: None });
+                        live = Some(Live { _reader: reader, _midi: midi_conn, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now, last_stats: String::new(), last_stats_at: 0, rumble_off: None });
                         let _ = req.reply.send(Ok(info));
                     }
                     Err(e) => {
@@ -924,8 +925,11 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                 l.last_refresh = now;
                 platform.refresh_capture();
                 if let Some(t) = platform.capture_stats() {
-                    if t != l.last_stats {
+                    // resent every second even when unchanged: the first copy can land before the
+                    // session screen exists, and the line must never stay blank
+                    if t != l.last_stats || now.saturating_sub(l.last_stats_at) >= 1000 * MS {
                         l.last_stats = t.clone();
+                        l.last_stats_at = now;
                         l.session.push(Ev::Capture { text: t });
                     }
                 }
