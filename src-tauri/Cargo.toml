@@ -1,0 +1,45 @@
+[package]
+name = "inputlab"
+version = "0.1.0"
+description = "native input device tester"
+edition = "2021"
+rust-version = "1.80"
+publish = false
+
+[lib]
+name = "inputlab_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.6", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.7", features = [] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+hidapi = "2.6.7"
+gilrs = "0.11.2"
+midir = "0.11.1"
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.62.2"
+features = [
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Graphics_Gdi",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Performance",
+  "Win32_System_Threading",
+  "Win32_UI_Input",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13.2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+panic = "unwind"
+strip = true

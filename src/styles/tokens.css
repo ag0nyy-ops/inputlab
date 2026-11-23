@@ -1,0 +1,38 @@
+/* inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab */
+
+@layer reset, tokens, base, layout, components, atmosphere, motion, a11y;
+
+@property --jdx-stare { syntax: "<number>"; inherits: true; initial-value: 0; }
+
+@layer tokens {
+  :root {
+    --bg: #060606;
+    --fg: #ececec;
+    --bg-2:        color-mix(in oklab, var(--fg) 4%,  var(--bg));
+    --muted:       color-mix(in oklab, var(--fg) 74%, var(--bg));
+    --dim:         color-mix(in oklab, var(--fg) 56%, var(--bg));   /* placeholders: the dimmest text allowed */
+    --line:        color-mix(in oklab, var(--fg) 13%, var(--bg));
+    --line-strong: color-mix(in oklab, var(--fg) 32%, var(--bg));
+    --fringe-r: color-mix(in oklab, #ff2a55 70%, var(--fg));   /* the only colour: big titles only */
+    --fringe-c: color-mix(in oklab, #19d3ff 70%, var(--fg));
+
+    /* the test surface: pure black = no input, pure white = active.
+       the chrome above uses the dossier palette; the visualisations use these. */
+    --off: #000;
+    --on: #fff;
+
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --goth: "UnifrakturMaguntia", "Old English Text MT", serif;
+    --gutter: clamp(16px, 4vw, 56px);
+    --max: 1320px;
+    --ease-liquid: cubic-bezier(.22, 1, .36, 1);
+    --ease-ink: cubic-bezier(.65, 0, .35, 1);
+    --ease-spring: linear(0, .009, .035 2.1%, .141, .281 6.7%, .723 12.9%, .938 16.7%,
+                          1.017, 1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%,
+                          1.129 32.8%, 1.051 39.6%, 1.017 43.1%, .991, .977 51%, .974 53.8%,
+                          .975 57.1%, .997 69.8%, 1.003 76.9%, 1);
+    --mx: 640; --my: 360;   /* cursor, plain numbers, written by js */
+    --dilate: 0;
+  }
+}

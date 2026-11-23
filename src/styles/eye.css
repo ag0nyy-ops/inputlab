@@ -1,0 +1,131 @@
+/* inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+   the css eye: no svg, no images. geometry and rules follow the dossier site. */
+
+@layer components {
+  :root:has(:is(a, button, summary, [role="button"]):is(:hover, :focus-visible)) .eye__pupil { --dilate: 1; }
+
+  .eye {
+    --R: 62.5cqw;
+    --stroke: max(1px, 1.1cqw);
+    --jdx-lid-top: 0cqw;
+    --jdx-lid-bottom: 0cqw;
+    --jdx-blink: 6s;
+    --jdx-blink-delay: 0s;
+    container-type: inline-size;
+    position: relative; display: block;
+    aspect-ratio: 2 / 1;
+  }
+  .eye__ball {
+    position: absolute; inset: 0; overflow: hidden;
+    mask:
+      radial-gradient(circle var(--R) at 50% 62.5cqw,  #000 calc(100% - .5px), #0000 100%),
+      radial-gradient(circle var(--R) at 50% -12.5cqw, #000 calc(100% - .5px), #0000 100%);
+    mask-composite: intersect;
+    -webkit-mask-composite: source-in;
+    background: radial-gradient(60% 90% at 50% 50%, color-mix(in oklab, var(--fg) 7%, var(--bg)), var(--bg) 75%);
+  }
+  .eye__iris {
+    --dx: calc(var(--mx) - var(--jdx-ex, var(--mx)));
+    --dy: calc(var(--my) - var(--jdx-ey, var(--my)));
+    --reach: min(1, calc(hypot(var(--dx), var(--dy)) / 420));
+    --look: calc(var(--reach) * (1 - var(--jdx-stare)));
+    position: absolute; left: 50%; top: 50%;
+    width: 34cqw; aspect-ratio: 1; margin: -17cqw 0 0 -17cqw;
+    border-radius: 50%;
+    background: radial-gradient(circle closest-side,
+      transparent 0 66%, var(--fg) 66.5% 68.5%, transparent 69% 94.5%,
+      var(--fg) 95% 99%, transparent 99.5%);
+    translate:
+      calc(cos(atan2(var(--dy), var(--dx))) * var(--look) * 10cqw)
+      calc(sin(atan2(var(--dy), var(--dx))) * var(--look) * 5cqw);
+    transition: translate .65s var(--ease-liquid);
+  }
+  .eye__fibers {
+    position: absolute; inset: 0; border-radius: 50%;
+    background: repeating-conic-gradient(var(--muted) 0 .9deg, transparent .9deg 5deg);
+    mask: radial-gradient(circle closest-side, transparent 70%, #000 71% 93%, transparent 94%);
+  }
+  .eye__pupil {
+    position: absolute; inset: 33%; border-radius: 50%;
+    background: var(--fg);
+    scale: calc(1 + var(--dilate) * .45 + var(--jdx-stare) * .6);
+    transition: scale .6s var(--ease-spring);
+  }
+  .eye__pupil::after {
+    content: ""; position: absolute; left: 20%; top: 18%;
+    width: 24%; aspect-ratio: 1; border-radius: 50%; background: var(--bg);
+  }
+  .eye__lid {
+    position: absolute; left: 0; right: 0; height: 100cqw;
+    will-change: transform;
+  }
+  .eye__lid--top {
+    top: -50cqw;
+    background: radial-gradient(circle var(--R) at 50% 112.5cqw,
+      transparent calc(var(--R) - var(--stroke)),
+      var(--fg)   calc(var(--R) - var(--stroke)) var(--R),
+      var(--bg)   var(--R));
+    translate: 0 var(--jdx-lid-top);
+    transition: translate .9s var(--ease-spring);
+  }
+  .eye__lid--bottom {
+    top: 0;
+    background: radial-gradient(circle var(--R) at 50% -12.5cqw,
+      transparent calc(var(--R) - var(--stroke)),
+      var(--fg)   calc(var(--R) - var(--stroke)) var(--R),
+      var(--bg)   var(--R));
+    translate: 0 var(--jdx-lid-bottom);
+    transition: translate .9s var(--ease-spring);
+  }
+  .eye__lashes {
+    position: absolute; left: 0; right: 0; top: -14cqw; height: 40cqw;
+    pointer-events: none;
+    background: repeating-conic-gradient(from 0deg at 50% 76.5cqw,
+      var(--fg) 0 .45deg, transparent .45deg 7.5deg);
+    mask:
+      radial-gradient(circle at 50% 76.5cqw,
+        #0000 calc(var(--R) + 1.5cqw), #000 calc(var(--R) + 2cqw) calc(var(--R) + 9cqw),
+        #0000 calc(var(--R) + 9.5cqw)),
+      linear-gradient(90deg, #0000 14%, #000 30% 70%, #0000 86%);
+    mask-composite: intersect;
+    -webkit-mask-composite: source-in;
+    transform-origin: 50% 14cqw;
+    translate: 0 var(--jdx-lid-top);
+    transition: translate .9s var(--ease-spring);
+    will-change: transform;
+  }
+  .eye--logo { width: 3rem; }
+  .eye--hero { width: min(22rem, 70%); margin-inline: auto; }
+}
+
+@layer motion {
+  @media (prefers-reduced-motion: no-preference) {
+    .eye__fibers { animation: jdx-spin 70s linear infinite; }
+    .eye__lid--top    { animation: blink-top    var(--jdx-blink) var(--jdx-blink-delay) infinite; }
+    .eye__lid--bottom { animation: blink-bottom var(--jdx-blink) var(--jdx-blink-delay) infinite; }
+    .eye__lashes      { animation: blink-lashes var(--jdx-blink) var(--jdx-blink-delay) infinite; }
+    @keyframes jdx-spin { to { rotate: 360deg; } }
+    @keyframes blink-top {
+      0%, 91%   { transform: none; animation-timing-function: cubic-bezier(.55, 0, 1, .45); }
+      92.4%     { transform: translateY(40cqw); }
+      93.2%     { transform: translateY(40cqw); animation-timing-function: cubic-bezier(0, .55, .45, 1); }
+      96%, 100% { transform: none; }
+    }
+    @keyframes blink-bottom {
+      0%, 91%   { transform: none; animation-timing-function: cubic-bezier(.55, 0, 1, .45); }
+      92.4%     { transform: translateY(-11cqw); }
+      93.2%     { transform: translateY(-11cqw); animation-timing-function: cubic-bezier(0, .55, .45, 1); }
+      96%, 100% { transform: none; }
+    }
+    @keyframes blink-lashes {
+      0%, 91%   { transform: none; animation-timing-function: cubic-bezier(.55, 0, 1, .45); }
+      92.4%     { transform: translateY(40cqw) scaleY(-.7); }
+      93.2%     { transform: translateY(40cqw) scaleY(-.7); animation-timing-function: cubic-bezier(0, .55, .45, 1); }
+      96%, 100% { transform: none; }
+    }
+    :root[data-idle="asleep"] .eye { --jdx-lid-top: 40cqw; --jdx-lid-bottom: -11cqw; }
+    :root[data-idle="asleep"] .eye__iris { translate: 0 4cqw; }
+    :root[data-idle="asleep"] .eye__lashes { scale: 1 -.7; }
+  }
+  [data-fx="low"] .eye__fibers, [data-fx="low"] .eye__lashes { display: none; }
+}

@@ -1,0 +1,40 @@
+/* inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab */
+
+@layer reset {
+  *, *::before, *::after { box-sizing: border-box; }
+  * { margin: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { background: none; border: 0; padding: 0; cursor: pointer; }
+  canvas, svg { display: block; }
+  ul { padding: 0; list-style: none; }
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 400 1.0625rem/1.65 var(--sans);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    user-select: none; -webkit-user-select: none;
+  }
+  ::placeholder { color: var(--dim); }
+  :is(.mono, code, kbd) { font-family: var(--mono); }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  ::selection { background: var(--fg); color: var(--bg); }
+  * { scrollbar-width: none; }
+  .scroll { overflow: auto; min-height: 0; }
+  .skip { position: fixed; left: 8px; top: -60px; z-index: 100; background: var(--fg); color: var(--bg);
+    padding: .6rem 1rem; font: 600 .76rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+  .skip:focus { top: 8px; }
+}
+
+@layer a11y {
+  :focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  }
+  @media (prefers-contrast: more) { .atmosphere { display: none; } }
+}
