@@ -1,0 +1,38 @@
+inputlab source-available licence
+© 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+
+this is a custom licence, not an open-source one. in plain words: you may look at the source and learn from it, and you may build your own app. you may not copy this one, or pieces of it.
+
+1. what you may do
+
+   a. read, browse, fork on github (as github's terms allow) and study the source code.
+   b. download the official release builds, or build the app from this source for yourself, and use it to test your own devices, for any purpose, including commercial testing.
+   c. learn from how it works and write your own, independent app. ideas, techniques, algorithms described in general terms, file formats, usb ids, hardware behaviour and the public specifications it implements (hid, midi, usb, raw input and so on) are not restricted by this licence. you are free to re-implement any of them in your own words and your own code.
+
+2. what you may not do
+
+   a. copy the whole project, or any whole file, function, component, module, stylesheet or data table from it, into anything of your own.
+   b. copy any part of the source that is substantial enough to be recognisable as taken from this project. renaming variables, reformatting, translating to another language or lightly rewriting it does not make it yours.
+   c. this includes the layout data, the model catalogs, the mouse and controller drawings, the stylesheets, the eye and the exit-rule logic. these are the project's own work.
+   d. distribute, publish, sell, sublicense or host this project or a modified version of it, as source or as a build. a fork that stays a github fork of this repository is fine; passing it off or shipping it as your own is not.
+   e. remove or alter the notices in the source files or this licence.
+
+3. your own app
+
+   if you make your own app after reading this one, it must be your own code. you may credit this project as inspiration if you like. you may not claim it as your own work, and you may not use its name or the name inputlab for yours.
+
+4. third-party material
+
+   the fonts (UnifrakturMaguntia, IBM Plex Mono, IBM Plex Sans) are under the SIL Open Font License 1.1, and the libraries the project depends on keep their own licences. this licence does not change either. the font licence texts are in public/licenses/.
+
+5. permission
+
+   if you want to do something this licence does not allow, ask first and get written permission from the author.
+
+6. no warranty
+
+   the software is provided as is, without warranty of any kind. the author is not liable for any damage or loss that comes from using it, including from the capture features that lock the mouse and block keyboard shortcuts during a test. use the --no-capture flag described in the readme if you are unsure.
+
+7. ending
+
+   if you break this licence, your permission to use the project ends. the rest of it stays in force.

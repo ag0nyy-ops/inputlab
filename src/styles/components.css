@@ -1,4 +1,4 @@
-/* inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab */
+/* inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE */
 
 @layer components {
   .label { font: 400 .75rem/1.3 var(--mono); letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }

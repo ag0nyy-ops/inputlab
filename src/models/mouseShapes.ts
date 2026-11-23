@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // mouse silhouettes, drawn top-down on a 200 x 320 grid, front of the mouse at the top.
 // these are grip families (small symmetrical, slim ambidextrous, ergonomic...), not
 // product renders: the point is that a g305 and a superlight do not look the same.

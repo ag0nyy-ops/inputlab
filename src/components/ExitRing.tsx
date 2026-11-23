@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 import { useEffect, useRef } from 'react';
 import { onFrame } from '../lib/session';
 import type { ExitKind } from '../lib/types';

@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 import { FG, LINE_STRONG, MUTED, legend, shade } from '../lib/draw';
 import { SHAPES, SHAPE_ASPECT, type ShapeId } from './mouseShapes';
 

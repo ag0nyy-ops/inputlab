@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // the live session. frames from rust are fanned out imperatively: views
 // subscribe and draw straight to canvas / refs, so react never re-renders
 // for device data.

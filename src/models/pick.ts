@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // remembered model choices, per device (vid:pid when it has one). local only.
 import { useSyncExternalStore } from 'react';
 import type { DeviceInfo } from '../lib/types';

@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // live hex dump of the newest input report. a byte that changed flashes white and
 // fades; the canvas redraws only while something is flashing.
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';

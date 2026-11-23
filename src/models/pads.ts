@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // which controller is this? usb vid/pid is reliable for pads, so ids come first,
 // names second. xinput pads on windows have no vid/pid, so the name decides.
 // to add a pad: add a row to PADS (see readme).

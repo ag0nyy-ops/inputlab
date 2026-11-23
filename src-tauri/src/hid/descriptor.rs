@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! hand-rolled hid report descriptor parser: enough of the spec to turn
 //! gamepads, joysticks, wheels, pedals, arcade sticks and odd gadgets into
 //! labelled buttons and axes. input items only; long items and vendor-defined

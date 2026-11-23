@@ -5,6 +5,7 @@ description = "native input device tester"
 edition = "2021"
 rust-version = "1.80"
 publish = false
+license-file = "../LICENSE"
 
 [lib]
 name = "inputlab_lib"

@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! thumbstick and trigger analysis: circularity (the traced shape of the gate),
 //! deadzone, max range, and resting drift. values are the raw -1..1 the pad
 //! reports (no filtering), with y as the pad gives it.

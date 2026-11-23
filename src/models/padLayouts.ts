@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // controller diagrams as data on a 400 x 280 grid. each element names the gilrs
 // control(s) that light it, so the same drawing code serves every pad.
 import type { PadModel, PadStyle } from './pads';

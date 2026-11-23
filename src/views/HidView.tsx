@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // anything hidapi can open: remotes, flight sticks, wheels, pedals, arcade sticks, tablets, odd gadgets.
 // buttons are black/white squares, axes are bars, and below it all is the raw hex of every report.
 import { useEffect, useRef, useState } from 'react';

@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // which mouse is this? names first (usb mice report a product string), then
 // vid/pid. wireless receivers are shared by several mice, so those are flagged
 // ambiguous and the user picks once; the choice is remembered on this machine.

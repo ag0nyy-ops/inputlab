@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // picks the view for the device. views for the other device types land in later phases.
 import { useEffect, useRef } from 'react';
 import { onFrame } from '../lib/session';

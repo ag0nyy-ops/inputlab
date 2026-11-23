@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // the controller: a diagram that lights per button (analog triggers fill by how far
 // they are pulled), live stick dots, and the tests: circularity, drift, polling,
 // rumble, plus a raw table of every control the pad reports.

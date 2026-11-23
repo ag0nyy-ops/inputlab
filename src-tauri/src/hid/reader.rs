@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! raw hid input-report reader. one thread per open device, each report stamped
 //! with the shared monotonic clock the moment read() returns. used for the real
 //! polling rate of controllers and by the generic hid view.

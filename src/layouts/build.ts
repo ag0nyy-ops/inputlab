@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // keyboard layouts as data. a layout is rows of keys in key units (1u = a standard key).
 // to add one: add a size to `Size`, then describe it in `buildLayout` (see readme).
 

@@ -160,6 +160,6 @@ there is no network code, no telemetry, no account. the webview's content securi
 
 ## fonts and licence
 
-the ui uses UnifrakturMaguntia, IBM Plex Mono and IBM Plex Sans, self-hosted, under the SIL Open Font License 1.1. the licence texts are in `public/licenses/`.
+the source is viewable, not reusable: you may read it, learn from it, run it and build your own app, but you may not copy the project or pieces of its code. the full terms are in [LICENSE](LICENSE). it is a custom licence, not an open-source one.
 
-the project has no licence file yet, so by default all rights are reserved until one is added.
+the ui uses UnifrakturMaguntia, IBM Plex Mono and IBM Plex Sans, self-hosted, under the SIL Open Font License 1.1. the licence texts are in `public/licenses/`.

@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // the session summary: one json document and one plain-text version of it.
 // only what the test measured and the device's public ids go in: no serials, no paths.
 import type { AppInfo, SessionInfo } from './types';

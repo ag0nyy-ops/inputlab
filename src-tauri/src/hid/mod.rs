@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! hidapi side: enumeration, report reading, descriptor parsing, analog profiles.
 //! one shared HidApi instance: the crate only allows one at a time.
 

@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! gilrs lives on its own thread (it is not Send on every platform). it keeps
 //! the list of connected pads, streams raw button/axis events to the engine,
 //! plays rumble effects and reads the battery for the pad under test.

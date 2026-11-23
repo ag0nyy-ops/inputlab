@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 import { FG, LINE_STRONG, MONO, MUTED, legend, shade } from '../lib/draw';
 import { BODIES, padElements, type PadEl } from './padLayouts';
 import type { PadMatch } from './pads';

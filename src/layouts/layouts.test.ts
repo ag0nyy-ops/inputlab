@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 import { describe, expect, it } from 'vitest';
 import { buildLayout, keyRects, SIZES, type KeyDef, type Variant } from './build';
 import { detectFamily, detectSize } from './detect';

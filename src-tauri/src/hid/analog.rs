@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! analog keyboard profiles. a profile recognises a board's analog hid
 //! interface and turns its reports into (key, depth 0..1). profiles are
 //! pluggable: add a struct, implement `AnalogProfile`, list it in `profile`.

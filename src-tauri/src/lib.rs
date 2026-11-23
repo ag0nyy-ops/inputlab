@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! inputlab: native input device tester. rust owns every device read, every
 //! timestamp and all the math; the webview only renders what it is sent.
 

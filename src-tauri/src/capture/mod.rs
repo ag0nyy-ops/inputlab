@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! test-session capture rules. this module is pure logic (no os calls) so the
 //! exit rules, the part that must never trap the user, are unit tested.
 //!

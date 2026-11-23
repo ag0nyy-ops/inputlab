@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // legends. physical keys never change; only what is printed on them does.
 
 export type LabelFamily = 'qwerty' | 'azerty' | 'qwertz' | 'dvorak' | 'colemak';

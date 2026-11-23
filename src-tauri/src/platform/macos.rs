@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! macos: enumeration through hidapi (IOKit HID manager underneath). the raw
 //! input + capture layer is not written yet, so sessions here are view-only.
 

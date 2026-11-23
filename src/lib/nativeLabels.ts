@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // what is printed on the keys under the os's current layout. native (rust) first,
 // then the browser's keyboard map, else nothing (static tables take over).
 import { getBridge } from './bridge';

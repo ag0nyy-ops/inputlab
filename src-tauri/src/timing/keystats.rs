@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! per-key timing from raw timestamps: hold time, chatter (release->press
 //! bounce shorter than the threshold), and how many keys are down at once.
 //! os auto-repeat (a press while already down) is ignored, not counted as chatter.

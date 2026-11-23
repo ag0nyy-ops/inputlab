@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! everything rust streams to the webview. batched into frames (~120hz) so a
 //! busy device never means a busy ui; timestamps stay full resolution in rust.
 

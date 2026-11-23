@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // mirrors the structs rust sends. keep in sync with src-tauri/src.
 
 export type DeviceKind = 'keyboard' | 'mouse' | 'gamepad' | 'hid' | 'midi';

@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // builds the readme screenshots from the real interface running against the dev mock
 // (generic sample data, never a real device). 2x, saved as png; convert with webp q90.
 const { chromium } = require('playwright');

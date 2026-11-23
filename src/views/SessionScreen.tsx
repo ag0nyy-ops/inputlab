@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // the shell around every test. what it shows for exit depends on the rules:
 //   mouse    -> no controls at all, just the esc-hold ring and hint
 //   keyboard -> big exit button + the persistent combo hint + ring

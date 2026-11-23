@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 import type { EndReason } from './types';
 
 export const endMessages: Record<EndReason, { title: string; text: string; problem: boolean }> = {

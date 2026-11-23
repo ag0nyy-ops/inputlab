@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! guided dpi (cpi) test. the user moves the mouse a known physical distance
 //! while we sum the raw counts. raw input bypasses os acceleration and pointer
 //! speed, so counts / inches is the sensor's true cpi, as accurate as the

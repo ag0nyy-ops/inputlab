@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // the keyboard: an on-screen board that lights on keydown and goes dark on keyup,
 // driven by physical keys from rust (never layout characters).
 import { useEffect, useMemo, useRef, useState } from 'react';

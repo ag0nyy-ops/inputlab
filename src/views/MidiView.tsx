@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // midi: a keyboard lit by velocity, controller meters, pitch bend, and the message log.
 import { useEffect, useRef, useState } from 'react';
 import { Stamp } from '../components/Stamp';

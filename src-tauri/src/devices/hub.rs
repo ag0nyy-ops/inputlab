@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! scanning thread + subscriber fan-out. hotplug is handled two ways: the os
 //! layer and gilrs nudge the thread when they see a change, and the thread
 //! also rescans on a timer in case os hotplug events are flaky.

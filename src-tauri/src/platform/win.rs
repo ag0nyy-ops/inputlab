@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 //! windows: raw input (WM_INPUT) on a dedicated time-critical thread, low-level
 //! hooks for capture, ClipCursor for the mouse, QueryPerformanceCounter for time.
 //!

@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
 // the mouse: a model that lights up under your clicks, a movement arena with a live
 // trail, and four tests. everything is driven from the keyboard because a mouse
 // session captures the mouse completely (no clickable controls exist).
