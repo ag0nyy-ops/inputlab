@@ -80,6 +80,9 @@
   .seg > button { padding: .7em 1em; min-height: 44px; font: 600 .68rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
   .seg > button + button { border-left: 1px solid var(--fg); }
   .seg > button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+  .seg__item { padding: .7em 1em; min-height: 44px; display: inline-flex; align-items: center; font: 600 .68rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+  .seg__item + .seg__item { border-left: 1px solid var(--fg); }
+  .seg__item[data-on="1"] { background: var(--fg); color: var(--bg); }
 
   .banner { display: grid; grid-template-columns: auto 1fr auto; gap: 1rem; align-items: center; padding: 14px 16px; border: 1px solid var(--line-strong); background: var(--bg-2); }
   .banner--problem { background: var(--fg); color: var(--bg); border-color: var(--fg); }
@@ -97,4 +100,9 @@
 
   .modal { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgb(0 0 0 / .82); padding: var(--gutter); }
   .modal__panel { width: min(640px, 100%); max-height: 100%; overflow: auto; border: 1px solid var(--fg); background: var(--bg); padding: 1.6rem; display: grid; gap: 1rem; }
+
+  .picker { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1.4rem; align-items: start; padding: 14px 16px; border: 1px solid var(--line-strong); background: var(--bg-2); }
+  .picker canvas { border: 1px solid var(--line); background: #000; }
+  .picker__body { display: grid; gap: .6rem; align-content: start; }
+  .picker .select { max-width: 22rem; }
 }

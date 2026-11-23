@@ -52,3 +52,25 @@
   .meter { height: 8px; border: 1px solid var(--fg); }
   .meter > span { display: block; height: 100%; background: var(--fg); }
 }
+
+@layer components {
+  .mv { display: grid; grid-template-columns: minmax(170px, 210px) minmax(0, 1fr); gap: .8rem 1.6rem; align-content: start; }
+  .mv__side { display: grid; gap: .6rem; justify-items: center; align-content: start; }
+  .mv__wheel { width: 100%; }
+  .mv__panel { min-width: 0; display: grid; gap: 1rem; align-content: start; }
+  .mv__body { display: grid; gap: .8rem; align-content: start; justify-items: start; }
+  .mv__body > .kv, .mv__body > .mv__table, .mv__body > p, .mv__body > ol { justify-self: stretch; }
+  .mv__panel > .seg { justify-self: start; }
+  .mv__hz { font: 600 clamp(2.2rem, 5vw, 3.8rem)/1 var(--mono); letter-spacing: -.05em; }
+  .mv__hz span { font-size: .3em; letter-spacing: .1em; color: var(--muted); font-weight: 400; text-transform: uppercase; }
+  .mv__stats { grid-template-columns: max-content 1fr max-content 1fr; gap: .2rem 1.4rem; }
+  .mv__graph, .mv__ruler, .mv__trace { max-width: 100%; border: 1px solid var(--line-strong); }
+  .mv__steps { display: grid; gap: .2rem; padding-left: 1.2rem; list-style: decimal; font-size: .9rem; line-height: 1.4; }
+  .mv__result { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+  .mv__arena { grid-column: 1 / -1; min-width: 0; }
+  .mv__arena canvas { border: 1px solid var(--line-strong); width: 100%; }
+  .mv__table { width: 100%; border-collapse: collapse; font: 400 .85rem/1.4 var(--mono); }
+  .mv__table th { text-align: left; font-weight: 400; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; font-size: .68rem; padding: .3rem .6rem .3rem 0; border-bottom: 1px solid var(--line-strong); }
+  .mv__table td { padding: .45rem .6rem .45rem 0; border-bottom: 1px solid var(--line); }
+  @media (max-width: 760px) { .mv { grid-template-columns: 1fr; } }
+}

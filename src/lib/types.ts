@@ -77,6 +77,13 @@ export type EndReason = 'exit-button' | 'esc-hold' | 'combo' | 'focus-lost' | 'w
 
 export type Ev =
   | { t: 'key'; code: string; down: boolean; ts: number; hold: number | null; gap: number | null; chatter: boolean; held: number; max: number }
+  | { t: 'mouse'; dx: number; dy: number; n: number }
+  | { t: 'button'; n: number; down: boolean; ts: number; hold: number | null; gap: number | null; chatter: boolean }
+  | { t: 'wheel'; dx: number; dy: number }
+  | ({ t: 'poll' } & PollSnap)
+  | ({ t: 'dpi' } & DpiSnap)
+  | ({ t: 'sensor' } & SensorSnap)
+  | { t: 'clicks'; buttons: ButtonStat[] }
   | { t: 'exit'; kind: ExitKind; progress: number }
   | { t: 'reserved'; label: string }
   | { t: 'ended'; reason: EndReason };
@@ -92,7 +99,59 @@ export interface SessionSettings {
   chatterMs: number;
 }
 
-export type SessionCommand = { type: 'resetKeys' };
+export interface PollSnap {
+  hz: number | null;
+  avgHz: number | null;
+  minHz: number | null;
+  maxHz: number | null;
+  intervalMinUs: number | null;
+  intervalAvgUs: number | null;
+  intervalMaxUs: number | null;
+  jitterUs: number | null;
+  nominal: number | null;
+  reports: number;
+  graph: number[];
+}
+
+export interface DpiSnap {
+  state: 'idle' | 'counting' | 'done';
+  distanceIn: number;
+  counts: number;
+  path: number;
+  straightness: number;
+  dpi: number | null;
+}
+
+export interface SensorSnap {
+  active: boolean;
+  steps: number;
+  radius: number | null;
+  jitterPct: number | null;
+  snapRatio: number | null;
+  snapping: boolean;
+  angles: number[];
+  path: [number, number][];
+}
+
+export interface ButtonStat {
+  n: number;
+  clicks: number;
+  holdMin: number | null;
+  holdAvg: number | null;
+  holdMax: number | null;
+  chatter: number;
+  minGap: number | null;
+}
+
+export type SessionCommand =
+  | { type: 'resetKeys' }
+  | { type: 'dpiStart'; distanceIn: number }
+  | { type: 'dpiStop' }
+  | { type: 'dpiReset' }
+  | { type: 'sensorStart' }
+  | { type: 'sensorStop' }
+  | { type: 'sensorReset' }
+  | { type: 'mouseReset' };
 
 export interface KeyLabels {
   layout_name: string;

@@ -2,7 +2,7 @@
 // dev-only fake backend. imported behind import.meta.env.DEV, so it never ships.
 // url switches: ?empty=1  ?state=offline (no raw input)  ?os=macos|linux  ?many=1
 
-import type { AppInfo, CaptureMode, DeviceInfo, DeviceListMsg, Ev, Frame, SessionInfo, SessionSettings } from './types';
+import type { AppInfo, CaptureMode, DeviceInfo, DeviceListMsg, Ev, Frame, SessionCommand, SessionInfo, SessionSettings } from './types';
 import type { Bridge } from './bridge';
 
 const q = new URLSearchParams(location.search);
@@ -57,6 +57,7 @@ export function mockBridge(): Bridge {
   let stop = () => {};
   let endNow: ((e: Ev & { t: 'ended' }) => void) | null = null;
   let activeMode: CaptureMode = 'other';
+  let cmdHandler: ((c: SessionCommand) => void) | null = null;
   const modeOf = (d: DeviceInfo): CaptureMode => (d.viewer === 'mouse' ? 'mouse' : d.viewer === 'keyboard' ? 'keyboard' : 'other');
   return {
     appInfo: async () => info,
@@ -90,6 +91,43 @@ export function mockBridge(): Bridge {
         }
         if (cond()) since ||= performance.now(); else since = 0;
       };
+      // fake mouse: the browser mouse stands in for raw input
+      let mdx = 0, mdy = 0, mn = 0, reports = 0, lastMove = 0;
+      let dpiState: 'idle' | 'counting' | 'done' = 'idle', dpiDist = 2, sx = 0, sy = 0, path = 0;
+      let sensorOn = false;
+      const sPath: [number, number][] = [];
+      let px = 0, py = 0;
+      const angles = new Array(36).fill(0);
+      const graph: number[] = [];
+      const clicks = [1, 2, 3, 4, 5].map((n) => ({ n, clicks: 0, holdMin: null as number | null, holdAvg: null as number | null, holdMax: null as number | null, chatter: 0, minGap: null as number | null }));
+      const bDown: Record<number, number> = {};
+      const mm = (e: MouseEvent) => {
+        if (mode !== 'mouse') return;
+        mdx += e.movementX; mdy += e.movementY; mn++; reports++; lastMove = performance.now();
+        if (dpiState === 'counting') { sx += e.movementX; sy += e.movementY; path += Math.hypot(e.movementX, e.movementY); }
+        if (sensorOn) { px += e.movementX; py += e.movementY; sPath.push([px, py]); const a = (Math.atan2(e.movementY, e.movementX) * 180 / Math.PI + 360) % 360; angles[Math.min(35, Math.floor(a / 10))]++; }
+      };
+      const mb = (e: MouseEvent, isDown: boolean) => {
+        if (mode !== 'mouse') return;
+        const n = [1, 3, 2, 4, 5][e.button] ?? 1; const now = performance.now(); const c = clicks[n - 1]!;
+        if (isDown) c.clicks++;
+        else if (bDown[n] != null) { const h = now - bDown[n]!; c.holdMin = Math.min(c.holdMin ?? h, h); c.holdMax = Math.max(c.holdMax ?? h, h); c.holdAvg = ((c.holdAvg ?? h) * (c.clicks - 1) + h) / c.clicks; }
+        if (isDown) bDown[n] = now;
+        buf.push({ t: 'button', n, down: isDown, ts: now - t0, hold: null, gap: null, chatter: false });
+        if (!isDown) buf.push({ t: 'clicks', buttons: clicks.map((x) => ({ ...x })) });
+      };
+      const md = (e: MouseEvent) => mb(e, true), mu = (e: MouseEvent) => mb(e, false);
+      const wh = (e: WheelEvent) => { if (mode === 'mouse') buf.push({ t: 'wheel', dx: -Math.sign(e.deltaX) * 120, dy: -Math.sign(e.deltaY) * 120 }); };
+      addEventListener('mousemove', mm); addEventListener('mousedown', md); addEventListener('mouseup', mu); addEventListener('wheel', wh);
+      cmdHandler = (c) => {
+        if (c.type === 'dpiStart') { dpiState = 'counting'; dpiDist = c.distanceIn; sx = sy = path = 0; }
+        if (c.type === 'dpiStop') dpiState = 'done';
+        if (c.type === 'dpiReset') { dpiState = 'idle'; sx = sy = path = 0; }
+        if (c.type === 'sensorStart') { sensorOn = true; sPath.length = 0; angles.fill(0); px = py = 0; }
+        if (c.type === 'sensorStop') sensorOn = false;
+        if (c.type === 'sensorReset') { sensorOn = false; sPath.length = 0; angles.fill(0); }
+        if (c.type === 'mouseReset') { reports = 0; graph.length = 0; clicks.forEach((x) => Object.assign(x, { clicks: 0, holdMin: null, holdAvg: null, holdMax: null, chatter: 0, minGap: null })); }
+      };
       const kd = (e: KeyboardEvent) => onKey(e, true);
       const ku = (e: KeyboardEvent) => onKey(e, false);
       addEventListener('keydown', kd);
@@ -108,6 +146,8 @@ export function mockBridge(): Bridge {
         clearInterval(timer);
         removeEventListener('keydown', kd);
         removeEventListener('keyup', ku);
+        removeEventListener('mousemove', mm); removeEventListener('mousedown', md); removeEventListener('mouseup', mu); removeEventListener('wheel', wh);
+        cmdHandler = null;
         stop = () => {};
       };
       timer = window.setInterval(() => {
@@ -118,6 +158,15 @@ export function mockBridge(): Bridge {
             buf.push({ t: 'exit', kind: mode === 'mouse' ? 'esc' : 'combo', progress: p });
           }
           if (p >= 1) return end({ t: 'ended', reason: mode === 'mouse' ? 'esc-hold' : 'combo' });
+        }
+        if (mode === 'mouse') {
+          if (mn) { buf.push({ t: 'mouse', dx: mdx, dy: mdy, n: mn }); mdx = mdy = mn = 0; }
+          const moving = performance.now() - lastMove < 150;
+          if (moving) graph.push(990 + Math.random() * 20), graph.length > 60 && graph.shift();
+          const counts = Math.hypot(sx, sy);
+          buf.push({ t: 'poll', hz: moving ? 1000 : null, avgHz: reports ? 1000 : null, minHz: reports ? 987 : null, maxHz: reports ? 1012 : null, intervalMinUs: reports ? 950 : null, intervalAvgUs: reports ? 1000 : null, intervalMaxUs: reports ? 1090 : null, jitterUs: reports ? 21 : null, nominal: reports ? 1000 : null, reports, graph: [...graph] });
+          buf.push({ t: 'dpi', state: dpiState, distanceIn: dpiDist, counts, path, straightness: path ? counts / path : 1, dpi: dpiState !== 'idle' && counts > 0 ? counts / dpiDist : null });
+          if (sensorOn || sPath.length) buf.push({ t: 'sensor', active: sensorOn, steps: sPath.length, radius: sPath.length > 40 ? 300 : null, jitterPct: sPath.length > 40 ? 12 : null, snapRatio: sPath.length > 40 ? 1.1 : null, snapping: false, angles: [...angles], path: sPath.slice(-400) });
         }
         flush();
       }, 16);
@@ -143,7 +192,7 @@ export function mockBridge(): Bridge {
       endNow?.({ t: 'ended', reason: 'exit-button' });
     },
     heartbeat: async () => {},
-    command: async () => {},
+    command: async (c) => cmdHandler?.(c),
     keyLabels: async () => null,
     subscribeDevices(cb) {
       const msg: DeviceListMsg = { devices: devices() };

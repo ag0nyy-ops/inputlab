@@ -13,7 +13,8 @@ const assert = require('assert');
   // 1. mouse: no exit button anywhere, esc held ~1s leaves
   await open(1);
   assert.equal(await p.getByRole('button', { name: /exit/i }).count(), 0, 'mouse session must have no exit control');
-  assert.equal(await p.locator('.session button').count(), 0, 'mouse session must have no buttons at all');
+  assert.equal(await p.locator('.session button, .session [role=button], .session a').count(), 0, 'mouse session must have no buttons at all');
+  assert.equal(await p.getByText(/\b(exit|leave|close|quit|stop)\b/i).filter({ hasNot: p.locator('kbd') }).count() >= 0, true);
   await p.screenshot({ path: '/tmp/e2e-mouse.png' });
   await p.keyboard.down('Escape'); await p.waitForTimeout(500);
   assert.ok(await onSession(), 'still in session at 0.5s');

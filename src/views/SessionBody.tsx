@@ -4,9 +4,11 @@ import { useEffect, useRef } from 'react';
 import { onFrame } from '../lib/session';
 import type { SessionInfo } from '../lib/types';
 import { KeyboardView } from './KeyboardView';
+import { MouseView } from './MouseView';
 
 export function SessionBody({ info }: { info: SessionInfo }) {
   if (info.device.viewer === 'keyboard') return <KeyboardView info={info} />;
+  if (info.device.viewer === 'mouse') return <MouseView info={info} />;
   return <RawMonitor info={info} />;
 }
 

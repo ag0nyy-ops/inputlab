@@ -4,6 +4,9 @@
 use serde::Serialize;
 
 use crate::capture::ExitKind;
+use crate::timing::dpi::DpiSnap;
+use crate::timing::poll::PollSnap;
+use crate::timing::sensor::{ButtonStat, SensorSnap};
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -31,6 +34,16 @@ pub enum Ev {
     /// hold: ms held (on release). gap: ms since last release of this key (on press).
     /// chatter: the press came back faster than the threshold. held/max: keys down now / most ever.
     Key { code: &'static str, down: bool, ts: f64, hold: Option<f64>, gap: Option<f64>, chatter: bool, held: u32, max: u32 },
+    /// summed raw mouse movement since the last frame (counts). `n` = reports folded in.
+    Mouse { dx: i32, dy: i32, n: u32 },
+    /// a mouse button changed state. hold on release, gap + chatter on press.
+    Button { n: u8, down: bool, ts: f64, hold: Option<f64>, gap: Option<f64>, chatter: bool },
+    /// wheel in 120ths of a notch: dy > 0 is up, dx > 0 is tilt right
+    Wheel { dx: i32, dy: i32 },
+    Poll(PollSnap),
+    Dpi(DpiSnap),
+    Sensor(SensorSnap),
+    Clicks { buttons: Vec<ButtonStat> },
     /// progress of an exit hold (0..1). sent whenever it changes.
     Exit { kind: ExitKind, progress: f32 },
     /// a key combo the os ate before we could see it, noticed after the fact

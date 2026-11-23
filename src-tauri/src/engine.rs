@@ -19,7 +19,10 @@ use crate::devices::{DeviceInfo, Viewer};
 use crate::events::{EndReason, Ev, Frame};
 use crate::keys;
 use crate::platform::{CaptureMode, CaptureReport, CaptureSpec, Platform, RawEvent, RawSink, ReservedCombo, SrcId};
+use crate::timing::dpi::DpiTest;
 use crate::timing::keystats::KeyTracker;
+use crate::timing::poll::PollEstimator;
+use crate::timing::sensor::{ButtonTracker, SensorTest};
 use crate::timing::{now_ns, ns_to_ms};
 
 const MS: u64 = 1_000_000;
@@ -30,6 +33,7 @@ const REFRESH_CAPTURE_EVERY: u64 = 250 * MS;
 /// focus can flicker while the capture is being armed
 const FOCUS_GRACE: u64 = 600 * MS;
 const HEARTBEAT_TIMEOUT: u64 = 10_000 * MS;
+const SNAP_EVERY: u64 = 50 * MS;
 
 pub trait FrameSink: Send {
     /// false when the receiver is gone
@@ -62,6 +66,26 @@ pub fn mode_for(viewer: Viewer) -> CaptureMode {
     }
 }
 
+/// everything a mouse session measures
+struct MouseState {
+    poll: PollEstimator,
+    dpi: DpiTest,
+    sensor: SensorTest,
+    buttons: ButtonTracker,
+    dx: i32,
+    dy: i32,
+    n: u32,
+    last_snap: u64,
+    last_reports: u64,
+    idle_sent: bool,
+}
+
+impl MouseState {
+    fn new(chatter_ms: f64) -> Self {
+        Self { poll: PollEstimator::new(), dpi: DpiTest::new(), sensor: SensorTest::new(), buttons: ButtonTracker::new(chatter_ms), dx: 0, dy: 0, n: 0, last_snap: 0, last_reports: 0, idle_sent: true }
+    }
+}
+
 pub struct Session {
     pub device: DeviceInfo,
     pub mode: CaptureMode,
@@ -72,6 +96,7 @@ pub struct Session {
     last_exit_progress: f32,
     all_down: HashSet<&'static str>,
     keys: KeyTracker,
+    mouse: Option<MouseState>,
     buf: Vec<Ev>,
     seq: u64,
 }
@@ -89,6 +114,7 @@ impl Session {
             last_exit_progress: 0.0,
             all_down: HashSet::new(),
             keys: KeyTracker::new(settings.chatter_ms),
+            mouse: (mode == CaptureMode::Mouse).then(|| MouseState::new(settings.chatter_ms)),
             buf: Vec::new(),
             seq: 0,
         }
@@ -115,8 +141,36 @@ impl Session {
                     }
                 }
             }
+            RawEvent::MouseMove { src, dx, dy, ts, absolute } => {
+                if let Some(m) = self.mouse.as_mut().filter(|_| self.srcs.contains(src)) {
+                    // absolute devices (tablets, remote desktop) report positions, not counts
+                    if !*absolute {
+                        m.poll.push(*ts);
+                        m.dpi.add(*dx, *dy);
+                        m.sensor.add(*dx, *dy);
+                        m.dx += *dx;
+                        m.dy += *dy;
+                        m.n += 1;
+                    }
+                }
+            }
+            RawEvent::MouseButton { src, button, down, ts } => {
+                let rel = ns_to_ms(ts.saturating_sub(self.started));
+                if let Some(m) = self.mouse.as_mut().filter(|_| self.srcs.contains(src)) {
+                    if let Some(o) = m.buttons.event(*button, *down, *ts) {
+                        self.buf.push(Ev::Button { n: *button, down: *down, ts: rel, hold: o.hold_ms, gap: o.gap_ms, chatter: o.chatter });
+                        if !*down {
+                            self.buf.push(Ev::Clicks { buttons: m.buttons.stats() });
+                        }
+                    }
+                }
+            }
+            RawEvent::Wheel { src, dx, dy, .. } => {
+                if self.mouse.is_some() && self.srcs.contains(src) {
+                    self.buf.push(Ev::Wheel { dx: *dx, dy: *dy });
+                }
+            }
             RawEvent::FocusLost { .. } | RawEvent::DevicesChanged | RawEvent::RawBlind => {}
-            _ => {}
         }
     }
 
@@ -139,6 +193,35 @@ impl Session {
     /// reset the per-session key stats (the "reset" button of the tested tracker)
     pub fn reset_keys(&mut self) {
         self.keys.reset();
+    }
+
+    /// ui commands for the per-session tests
+    pub fn command(&mut self, cmd: SessionCommand, now: u64) {
+        match cmd {
+            SessionCommand::ResetKeys => self.reset_keys(),
+            _ => {}
+        }
+        let Some(m) = self.mouse.as_mut() else { return };
+        match cmd {
+            SessionCommand::DpiStart { distance_in } => m.dpi.start(distance_in),
+            SessionCommand::DpiStop => m.dpi.stop(),
+            SessionCommand::DpiReset => m.dpi.reset(),
+            SessionCommand::SensorStart => m.sensor.start(),
+            SessionCommand::SensorStop => m.sensor.stop(),
+            SessionCommand::SensorReset => m.sensor.reset(),
+            SessionCommand::MouseReset => {
+                m.poll.reset();
+                m.buttons.reset();
+                m.last_reports = 0;
+                m.idle_sent = false;
+            }
+            SessionCommand::ResetKeys => {}
+        }
+        // answer immediately so the ui never shows stale numbers after a command
+        self.buf.push(Ev::Dpi(m.dpi.snapshot()));
+        self.buf.push(Ev::Sensor(m.sensor.snapshot()));
+        self.buf.push(Ev::Poll(m.poll.snapshot(now)));
+        self.buf.push(Ev::Clicks { buttons: m.buttons.stats() });
     }
 
     pub fn heartbeat(&mut self, now: u64) {
@@ -167,6 +250,24 @@ impl Session {
         if now.saturating_sub(self.last_heartbeat) > HEARTBEAT_TIMEOUT {
             return Some(EndReason::Watchdog);
         }
+        if let Some(m) = self.mouse.as_mut() {
+            if now.saturating_sub(m.last_snap) >= SNAP_EVERY {
+                m.last_snap = now;
+                let snap = m.poll.snapshot(now);
+                let moving = snap.hz.is_some();
+                if snap.reports != m.last_reports || (!moving && !m.idle_sent) {
+                    m.idle_sent = !moving;
+                    m.last_reports = snap.reports;
+                    self.buf.push(Ev::Poll(snap));
+                }
+                if m.dpi.is_counting() {
+                    self.buf.push(Ev::Dpi(m.dpi.snapshot()));
+                }
+                if m.sensor.is_active() {
+                    self.buf.push(Ev::Sensor(m.sensor.snapshot()));
+                }
+            }
+        }
         None
     }
 
@@ -175,10 +276,19 @@ impl Session {
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.buf.is_empty()
+        !self.buf.is_empty() || self.mouse.as_ref().is_some_and(|m| m.n > 0)
     }
 
     pub fn take_frame(&mut self) -> Option<Frame> {
+        if let Some(m) = self.mouse.as_mut() {
+            if m.n > 0 {
+                let ev = Ev::Mouse { dx: m.dx, dy: m.dy, n: m.n };
+                m.dx = 0;
+                m.dy = 0;
+                m.n = 0;
+                self.buf.push(ev);
+            }
+        }
         if self.buf.is_empty() {
             return None;
         }
@@ -188,9 +298,16 @@ impl Session {
 }
 
 #[derive(serde::Deserialize, Clone, Debug)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SessionCommand {
     ResetKeys,
+    DpiStart { distance_in: f64 },
+    DpiStop,
+    DpiReset,
+    SensorStart,
+    SensorStop,
+    SensorReset,
+    MouseReset,
 }
 
 pub struct StartReq {
@@ -331,9 +448,7 @@ fn run(rx: Receiver<EngineMsg>, platform: Arc<dyn Platform>, nudge: Arc<Nudge>, 
             }
             Ok(EngineMsg::Command(cmd)) => {
                 if let Some(l) = live.as_mut() {
-                    match cmd {
-                        SessionCommand::ResetKeys => l.session.reset_keys(),
-                    }
+                    l.session.command(cmd, now);
                 }
             }
             Ok(EngineMsg::Heartbeat) => {
@@ -566,6 +681,89 @@ mod tests {
         assert_eq!(keys[1].5, 2, "max rollover");
         assert!((keys[2].2.unwrap() - 79.0).abs() < 0.01);
         assert!(keys[3].3, "15ms release->press is chatter");
+    }
+
+    fn mv(src: u64, dx: i32, dy: i32, ts: u64) -> RawEvent {
+        RawEvent::MouseMove { src, dx, dy, ts, absolute: false }
+    }
+
+    fn snaps(f: &Frame) -> (Option<f64>, Option<crate::timing::dpi::DpiSnap>) {
+        let mut hz = None;
+        let mut dpi = None;
+        for e in &f.events {
+            match e {
+                Ev::Poll(p) => hz = p.avg_hz,
+                Ev::Dpi(d) => dpi = Some(d.clone()),
+                _ => {}
+            }
+        }
+        (hz, dpi)
+    }
+
+    #[test]
+    fn mouse_movement_is_summed_per_frame_and_polling_is_measured() {
+        let mut s = mouse_session();
+        for i in 0..2000u64 {
+            s.on_raw(&mv(5, 2, -1, T0 + i * MS)); // 1000hz
+        }
+        s.tick(T0 + 2000 * MS);
+        let f = s.take_frame().unwrap();
+        let m = f.events.iter().find_map(|e| if let Ev::Mouse { dx, dy, n } = e { Some((*dx, *dy, *n)) } else { None }).unwrap();
+        assert_eq!(m, (4000, -2000, 2000));
+        let (hz, _) = snaps(&f);
+        assert!((hz.unwrap() - 1000.0).abs() < 5.0);
+    }
+
+    #[test]
+    fn movement_from_other_mice_and_absolute_devices_is_ignored() {
+        let mut s = mouse_session(); // device srcs = [5]
+        s.on_raw(&mv(99, 50, 50, T0));
+        s.on_raw(&RawEvent::MouseMove { src: 5, dx: 70, dy: 70, ts: T0, absolute: true });
+        s.tick(T0 + 100 * MS);
+        assert!(!s.take_frame().is_some_and(|f| f.events.iter().any(|e| matches!(e, Ev::Mouse { .. }))));
+    }
+
+    #[test]
+    fn dpi_test_runs_through_session_commands() {
+        let mut s = mouse_session();
+        s.command(SessionCommand::DpiStart { distance_in: 2.0 }, T0);
+        for i in 0..400u64 {
+            s.on_raw(&mv(5, 8, 0, T0 + i * MS)); // 3200 counts
+        }
+        s.command(SessionCommand::DpiStop, T0 + 400 * MS);
+        let f = s.take_frame().unwrap();
+        let (_, dpi) = snaps(&f);
+        let d = dpi.unwrap();
+        assert!((d.dpi.unwrap() - 1600.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn mouse_clicks_report_hold_and_chatter() {
+        let mut s = mouse_session();
+        s.on_raw(&RawEvent::MouseButton { src: 5, button: 1, down: true, ts: T0 });
+        s.on_raw(&RawEvent::MouseButton { src: 5, button: 1, down: false, ts: T0 + 70 * MS });
+        s.on_raw(&RawEvent::MouseButton { src: 5, button: 1, down: true, ts: T0 + 85 * MS });
+        let f = s.take_frame().unwrap();
+        let b: Vec<_> = f.events.iter().filter_map(|e| if let Ev::Button { down, hold, chatter, .. } = e { Some((*down, *hold, *chatter)) } else { None }).collect();
+        assert!((b[1].1.unwrap() - 70.0).abs() < 0.01);
+        assert!(b[2].2, "15ms release->press is a double-click chatter");
+    }
+
+    #[test]
+    fn wheel_events_reach_the_ui() {
+        let mut s = mouse_session();
+        s.on_raw(&RawEvent::Wheel { src: 5, dx: 0, dy: 120, ts: T0 });
+        s.on_raw(&RawEvent::Wheel { src: 5, dx: -120, dy: 0, ts: T0 });
+        let f = s.take_frame().unwrap();
+        assert_eq!(f.events.iter().filter(|e| matches!(e, Ev::Wheel { .. })).count(), 2);
+    }
+
+    #[test]
+    fn keyboard_sessions_have_no_mouse_state_to_confuse() {
+        let mut s = kbd_session();
+        s.on_raw(&mv(1, 5, 5, T0));
+        s.tick(T0 + 100 * MS);
+        assert!(s.take_frame().is_none());
     }
 
     #[test]
