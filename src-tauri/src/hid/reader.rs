@@ -15,6 +15,8 @@ pub struct HidReport {
 
 pub struct HidReader {
     stop: Arc<AtomicBool>,
+    /// the device's report descriptor, when the os would give it to us
+    pub descriptor: Vec<u8>,
 }
 
 impl HidReader {
@@ -26,6 +28,11 @@ impl HidReader {
         let dev = {
             let api = api.lock().map_err(|_| "hidapi lock poisoned".to_string())?;
             api.open_path(&cpath).map_err(|e| e.to_string())?
+        };
+        let mut desc = vec![0u8; 4096];
+        let descriptor = match dev.get_report_descriptor(&mut desc) {
+            Ok(n) => desc[..n].to_vec(),
+            Err(_) => vec![],
         };
         let stop = Arc::new(AtomicBool::new(false));
         let s2 = stop.clone();
@@ -42,7 +49,7 @@ impl HidReader {
                 }
             })
             .map_err(|e| e.to_string())?;
-        Ok(Self { stop })
+        Ok(Self { stop, descriptor })
     }
 }
 

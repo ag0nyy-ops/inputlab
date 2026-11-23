@@ -27,7 +27,7 @@ function devices(): DeviceInfo[] {
     dev({ id: 'pad-1', name: 'sample controller', kind: 'gamepad', vid: 0x1234, pid: 0x0003, backend: 'gilrs' }),
     dev({ id: 'hid-4', name: 'sample flight stick', kind: 'hid', vid: 0x1234, pid: 0x0004, backend: 'hidapi', note: 'usage 0001:0004' }),
     dev({ id: 'midi-5', name: 'sample midi keys', kind: 'midi', backend: 'midir' }),
-    dev({ id: 'kbd-0006', name: 'sample analog keyboard', kind: 'keyboard', vid: 0x1234, pid: 0x0006, analogProfile: 'wooting', connected: false }),
+    dev({ id: 'kbd-0006', name: 'sample analog keyboard', kind: 'keyboard', vid: 0x1234, pid: 0x0006, analogProfile: 'wooting', connected: !!q.get('analog') }),
   ];
   if (q.get('many')) {
     for (let i = 0; i < 14; i++) list.push(dev({ id: `hid-m${i}`, name: `sample hid device with a long name number ${i}`, kind: 'hid', backend: 'hidapi', vid: 0x4321, pid: i }));
@@ -218,7 +218,40 @@ export function mockBridge(): Bridge {
         ],
         comboWarning: q.get('combowarn') ? 'your desktop treats ctrl+alt+backspace as a session kill. only the on-screen exit button is guaranteed.' : null,
         noCapture,
+        hid: device.viewer === 'hid'
+          ? q.get('hiderr') ? { layout: null, error: 'hid_open failed: access denied' } : q.get('rawonly') ? { layout: { parsed: false, buttons: [], axes: [], reportIds: [], descriptorLen: 0 }, error: null } : { layout: { parsed: true, buttons: [...Array.from({ length: 12 }, (_, i) => `button ${i + 1}`), 'hat up', 'hat right', 'hat down', 'hat left'], axes: [{ name: 'x', min: 0, max: 255 }, { name: 'y', min: 0, max: 255 }, { name: 'z', min: 0, max: 255 }, { name: 'rz', min: 0, max: 255 }], reportIds: [], descriptorLen: 76 }, error: null }
+          : null,
+        analog: device.analogProfile ? { profile: 'wooting', verified: false, error: null } : null,
+        midiError: device.viewer === 'midi' && q.get('miderr') ? 'the midi port is busy' : null,
       };
+      // fake generic hid + midi + analog, driven by the keyboard / wheel
+      if (device.viewer === 'hid' || device.analogProfile) {
+        const rep = new Array(8).fill(0);
+        let last = rep.slice();
+        const bytes = () => { const out = rep.slice(); const ch = out.map((v, i) => (v !== last[i] ? i : -1)).filter((i) => i >= 0); last = out.slice(); return { out, ch }; };
+        const hk = (e: KeyboardEvent, d: boolean) => {
+          const n = '1234567890'.indexOf(e.key);
+          if (n >= 0 && n < 8) { rep[0] = d ? rep[0] | (1 << n) : rep[0] & ~(1 << n); }
+          if (e.code === 'ArrowLeft') rep[2] = d ? 0 : 128; if (e.code === 'ArrowRight') rep[2] = d ? 255 : 128;
+          if (e.code === 'ArrowUp') rep[3] = d ? 0 : 128; if (e.code === 'ArrowDown') rep[3] = d ? 255 : 128;
+          const { out, ch } = bytes();
+          buf.push({ t: 'hid', id: null, report: out, changed: ch, n: 1, buttons: [...Array.from({ length: 12 }, (_, i) => i < 8 ? !!(out[0] & (1 << i)) : false), false, false, false, false], axes: [out[2] / 255, out[3] / 255, 0.5, 0.5] });
+        };
+        rep[2] = 128; rep[3] = 128;
+        addEventListener('keydown', (e) => !e.repeat && hk(e, true)); addEventListener('keyup', (e) => hk(e, false));
+        if (device.analogProfile) {
+          const t = setInterval(() => { const keys: [string, number][] = [...down].filter((k) => k.startsWith('Key')).map((k) => [k, Math.min(1, ((performance.now() - (downAt[k] ?? performance.now())) / 600))]); if (keys.length) buf.push({ t: 'analog', keys }); }, 40);
+          const prev = stop; stop = () => { clearInterval(t); prev(); };
+        }
+      }
+      if (device.viewer === 'midi') {
+        const notes: Record<string, number> = { KeyA: 60, KeyW: 61, KeyS: 62, KeyE: 63, KeyD: 64, KeyF: 65, KeyT: 66, KeyG: 67, KeyY: 68, KeyH: 69, KeyU: 70, KeyJ: 71, KeyK: 72 };
+        const name = (n: number) => ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][n % 12] + (Math.floor(n / 12) - 1);
+        const mk = (e: KeyboardEvent, d: boolean) => { const n = notes[e.code]; if (n === undefined || e.repeat) return; buf.push({ t: 'midi', kind: d ? 'noteOn' : 'noteOff', channel: 1, a: n, b: d ? 90 : 0, value: d ? 40 + (n % 5) * 20 : 0, ts: performance.now() - t0, text: d ? `note on ${name(n)} velocity ${40 + (n % 5) * 20}` : `note off ${name(n)}` }); };
+        addEventListener('keydown', (e) => mk(e, true)); addEventListener('keyup', (e) => mk(e, false));
+        let cc = 0;
+        addEventListener('wheel', (e) => { cc = Math.max(0, Math.min(127, cc + (e.deltaY < 0 ? 8 : -8))); buf.push({ t: 'midi', kind: 'cc', channel: 1, a: 1, b: cc, value: cc, ts: performance.now() - t0, text: `cc 1 = ${cc}` }); buf.push({ t: 'midi', kind: 'pitch', channel: 1, a: 0, b: 0, value: (cc - 64) * 128, ts: performance.now() - t0, text: 'pitch bend' }); });
+      }
       return info2;
     },
     async endSession() {

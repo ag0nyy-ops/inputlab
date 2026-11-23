@@ -6,11 +6,15 @@ import type { SessionInfo } from '../lib/types';
 import { KeyboardView } from './KeyboardView';
 import { MouseView } from './MouseView';
 import { GamepadView } from './GamepadView';
+import { HidView } from './HidView';
+import { MidiView } from './MidiView';
 
 export function SessionBody({ info }: { info: SessionInfo }) {
   if (info.device.viewer === 'keyboard') return <KeyboardView info={info} />;
   if (info.device.viewer === 'mouse') return <MouseView info={info} />;
   if (info.device.viewer === 'gamepad') return <GamepadView info={info} />;
+  if (info.device.viewer === 'hid') return <HidView info={info} />;
+  if (info.device.viewer === 'midi') return <MidiView info={info} />;
   return <RawMonitor info={info} />;
 }
 

@@ -2,6 +2,7 @@
 // the keyboard: an on-screen board that lights on keydown and goes dark on keyup,
 // driven by physical keys from rust (never layout characters).
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { HexDump, type HexDumpHandle } from '../components/HexDump';
 import { Stamp } from '../components/Stamp';
 import { FG, LINE_STRONG, MONO, fitCanvas, legend, shade } from '../lib/draw';
 import { loadNativeLabels } from '../lib/nativeLabels';
@@ -47,6 +48,7 @@ export function KeyboardView({ info }: { info: SessionInfo }) {
   const heldEl = useRef<HTMLSpanElement>(null);
   const maxEl = useRef<HTMLSpanElement>(null);
   const logEl = useRef<HTMLOListElement>(null);
+  const dump = useRef<HexDumpHandle>(null);
 
   const layout = useMemo(() => getLayout(sizeSel, variantSel), [sizeSel, variantSel]);
   const family: LabelFamily = famSel === 'auto' ? (native ? detectFamily(native) : 'qwerty') : famSel;
@@ -70,6 +72,18 @@ export function KeyboardView({ info }: { info: SessionInfo }) {
       for (const e of events) {
         if (e.t === 'reserved') {
           setObserved((o) => (o.includes(e.label) ? o : [...o, e.label]));
+          continue;
+        }
+        if (e.t === 'analog') {
+          for (const [code, v] of e.keys) {
+            if (v > 0) l.depth.set(code, v);
+            else l.depth.delete(code);
+          }
+          l.dirty = true;
+          continue;
+        }
+        if (e.t === 'hid') {
+          dump.current?.push(e.report, e.changed);
           continue;
         }
         if (e.t !== 'key') continue;
@@ -147,7 +161,7 @@ export function KeyboardView({ info }: { info: SessionInfo }) {
           if (up !== undefined && now - up < GLOW_MS) b = 1 - (now - up) / GLOW_MS;
           else if (depthB !== undefined) b = depthB;
         }
-        drawKey(ctx, k, unit, gap, b, l.tested.has(k.code), l.chatter.has(k.code), v.checklist, labelFor(k.code, v.family, v.native));
+        drawKey(ctx, k, unit, gap, b, l.tested.has(k.code), l.chatter.has(k.code), v.checklist, labelFor(k.code, v.family, v.native), depthB);
       }
       if (fading) l.dirty = true;
     };
@@ -229,6 +243,18 @@ export function KeyboardView({ info }: { info: SessionInfo }) {
         </div>
       )}
 
+      {info.analog && (
+        <div className={`banner ${info.analog.error ? 'banner--problem' : ''}`}>
+          <Stamp tone={info.analog.error ? 'problem' : 'wip'} size="sm">{info.analog.error ? 'no analog' : 'analog'}</Stamp>
+          <p className="banner__p">
+            {info.analog.error
+              ? `could not open the analog interface (${info.analog.error}). keys still work as normal switches.`
+              : `${info.analog.profile} analog profile: key brightness follows how far each key is pressed. ${info.analog.verified ? '' : 'this profile is experimental and has not been checked against a real board; the raw report panel shows exactly what the keyboard sends.'}`}
+          </p>
+          <span />
+        </div>
+      )}
+
       <div ref={wrap} className="kb__stage">
         <canvas ref={canvas} role="img" aria-label={`on-screen ${layout.name} keyboard, lit while keys are held`} />
       </div>
@@ -284,6 +310,13 @@ export function KeyboardView({ info }: { info: SessionInfo }) {
           </ul>
         </section>
 
+        {info.analog && !info.analog.error && (
+          <section className="card kb__logcard">
+            <p className="label">raw analog reports · changed bytes flash</p>
+            <HexDump ref={dump} ariaLabel="raw analog keyboard report bytes" />
+          </section>
+        )}
+
         <section className="card kb__logcard">
           <p className="label">key log</p>
           <ol ref={logEl} className="kb__log" aria-label="key events, newest first" />
@@ -293,7 +326,7 @@ export function KeyboardView({ info }: { info: SessionInfo }) {
   );
 }
 
-function drawKey(ctx: CanvasRenderingContext2D, k: KeyDef, u: number, gap: number, b: number, tested: boolean, chatter: boolean, checklist: boolean, label: string): void {
+function drawKey(ctx: CanvasRenderingContext2D, k: KeyDef, u: number, gap: number, b: number, tested: boolean, chatter: boolean, checklist: boolean, label: string, depth?: number): void {
   ctx.beginPath();
   if (k.shape === 'isoEnter') {
     const x = k.x * u, y = k.y * u, w = k.w * u;
@@ -329,7 +362,8 @@ function drawKey(ctx: CanvasRenderingContext2D, k: KeyDef, u: number, gap: numbe
   const cx = (r.x + r.w / 2) * u + (k.shape === 'isoEnter' ? 0.125 * u : 0);
   const cy = (r.y + r.h / 2) * u + (k.shape === 'isoEnter' ? 0.5 * u : 0);
   const px = Math.max(8, Math.min(u * 0.3, (k.w * u * 0.8) / Math.max(1, label.length * 0.62)));
-  legend(ctx, label, cx, cy, b, px);
+  legend(ctx, label, cx, cy - (depth !== undefined && depth > 0.02 && depth < 0.995 ? px * 0.35 : 0), b, px);
+  if (depth !== undefined && depth > 0.02 && depth < 0.995) legend(ctx, `${Math.round(depth * 100)}%`, cx, cy + px * 0.75, b, Math.max(7, px * 0.62), 400);
 
   // tested marker: a small solid square in the corner (word-free, so it works on both states)
   if (tested && checklist) {

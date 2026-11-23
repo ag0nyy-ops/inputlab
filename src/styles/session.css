@@ -92,3 +92,14 @@
   .range { width: min(22rem, 100%); accent-color: var(--fg); min-height: 28px; }
   @media (max-width: 900px) { .gv { grid-template-columns: 1fr; } }
 }
+
+@layer components {
+  .hv { display: grid; gap: 1rem; align-content: start; }
+  .hv__buttons canvas { max-width: 100%; }
+  .hv__axes { display: grid; gap: .5rem; font: 400 .85rem/1.3 var(--mono); }
+  .hv__axes li { display: grid; grid-template-columns: 11rem minmax(0, 1fr) 4.5rem; gap: .8rem; align-items: center; }
+  .hv__axis { position: relative; display: block; height: 10px; border: 1px solid var(--fg); background: #000; }
+  .hv__axis > span { display: block; height: 100%; background: #fff; }
+  .hexdump { width: 100%; }
+  .hexdump canvas { border: 1px solid var(--line-strong); max-width: 100%; }
+}

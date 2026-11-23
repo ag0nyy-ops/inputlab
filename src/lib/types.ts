@@ -71,6 +71,17 @@ export interface SessionInfo {
   reserved: ReservedCombo[];
   comboWarning: string | null;
   noCapture: boolean;
+  hid: { layout: LayoutInfo | null; error: string | null } | null;
+  analog: { profile: string; verified: boolean; error: string | null } | null;
+  midiError: string | null;
+}
+
+export interface LayoutInfo {
+  parsed: boolean;
+  buttons: string[];
+  axes: { name: string; min: number; max: number }[];
+  reportIds: number[];
+  descriptorLen: number;
 }
 
 export type EndReason = 'exit-button' | 'esc-hold' | 'combo' | 'focus-lost' | 'watchdog' | 'ui-gone' | 'shutdown';
@@ -84,6 +95,9 @@ export type Ev =
   | ({ t: 'dpi' } & DpiSnap)
   | ({ t: 'sensor' } & SensorSnap)
   | { t: 'clicks'; buttons: ButtonStat[] }
+  | { t: 'hid'; id: number | null; report: number[]; changed: number[]; n: number; buttons: boolean[]; axes: number[] }
+  | { t: 'analog'; keys: [string, number][] }
+  | { t: 'midi'; kind: string; channel: number; a: number; b: number; value: number; ts: number; text: string }
   | { t: 'pad'; items: PadItem[] }
   | { t: 'padInfo'; forceFeedback: boolean; power: string; battery: number | null; pollSource: string }
   | { t: 'sticks'; left: StickSnap; right: StickSnap; rest: RestSnap }

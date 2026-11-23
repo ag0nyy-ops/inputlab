@@ -16,6 +16,8 @@ use tauri::ipc::Channel;
 use crate::capture::{exit_info, ExitInfo, ExitRule, ExitTracker, SessionSettings};
 use crate::devices::gamepad::{PadCmd, PadMsg};
 use crate::devices::hub::Nudge;
+use crate::hid::analog::AnalogProfile;
+use crate::hid::descriptor::{Layout, LayoutInfo};
 use crate::hid::reader::{HidReader, HidReport};
 use crate::devices::{DeviceInfo, Viewer};
 use crate::events::{EndReason, Ev, Frame, PadItem};
@@ -59,6 +61,25 @@ pub struct SessionInfo {
     pub reserved: Vec<ReservedCombo>,
     pub combo_warning: Option<String>,
     pub no_capture: bool,
+    pub hid: Option<HidSessionInfo>,
+    pub analog: Option<AnalogInfo>,
+    pub midi_error: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct HidSessionInfo {
+    pub layout: Option<LayoutInfo>,
+    /// why the device could not be read, when it could not
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalogInfo {
+    pub profile: String,
+    pub verified: bool,
+    pub error: Option<String>,
 }
 
 pub fn mode_for(viewer: Viewer) -> CaptureMode {
@@ -87,6 +108,66 @@ impl MouseState {
     fn new(chatter_ms: f64) -> Self {
         Self { poll: PollEstimator::new(), dpi: DpiTest::new(), sensor: SensorTest::new(), buttons: ButtonTracker::new(chatter_ms), dx: 0, dy: 0, n: 0, last_snap: 0, last_reports: 0, idle_sent: true }
     }
+}
+
+/// raw report tracking shared by the generic hid view and the analog-keyboard dump
+struct HidState {
+    layout: Option<Layout>,
+    last: Vec<u8>,
+    changed: std::collections::BTreeSet<u32>,
+    n: u32,
+    fresh: bool,
+    poll: PollEstimator,
+    last_snap: u64,
+    last_reports: u64,
+    idle_sent: bool,
+}
+
+impl HidState {
+    fn new(layout: Option<Layout>) -> Self {
+        Self { layout, last: vec![], changed: Default::default(), n: 0, fresh: false, poll: PollEstimator::new(), last_snap: 0, last_reports: 0, idle_sent: true }
+    }
+    fn on_report(&mut self, r: &HidReport) {
+        self.poll.push(r.ts);
+        self.n += 1;
+        if self.last.len() == r.data.len() {
+            for (i, (a, b)) in self.last.iter().zip(&r.data).enumerate() {
+                if a != b {
+                    self.changed.insert(i as u32);
+                }
+            }
+        } else {
+            self.changed.extend(0..r.data.len() as u32);
+        }
+        self.last = r.data.clone();
+        self.fresh = true;
+    }
+    fn flush(&mut self, buf: &mut Vec<Ev>) {
+        if !self.fresh {
+            return;
+        }
+        self.fresh = false;
+        let d = self.layout.as_ref().map(|l| l.decode(&self.last)).unwrap_or_default();
+        buf.push(Ev::Hid { id: d.id, report: self.last.clone(), changed: std::mem::take(&mut self.changed).into_iter().collect(), n: std::mem::take(&mut self.n), buttons: d.buttons, axes: d.axes });
+    }
+    fn tick(&mut self, now: u64, buf: &mut Vec<Ev>) {
+        if now.saturating_sub(self.last_snap) >= SNAP_EVERY {
+            self.last_snap = now;
+            let snap = self.poll.snapshot(now);
+            let moving = snap.hz.is_some();
+            if snap.reports != self.last_reports || (!moving && !self.idle_sent) {
+                self.idle_sent = !moving;
+                self.last_reports = snap.reports;
+                buf.push(Ev::Poll(snap));
+            }
+        }
+    }
+}
+
+struct AnalogState {
+    profile: Box<dyn AnalogProfile>,
+    last: std::collections::HashMap<&'static str, f32>,
+    raw: HidState,
 }
 
 /// everything a controller session measures
@@ -125,6 +206,9 @@ pub struct Session {
     keys: KeyTracker,
     mouse: Option<MouseState>,
     pad: Option<PadState>,
+    hid: Option<HidState>,
+    analog: Option<AnalogState>,
+    midi: bool,
     buf: Vec<Ev>,
     seq: u64,
 }
@@ -144,6 +228,9 @@ impl Session {
             all_down: HashSet::new(),
             keys: KeyTracker::new(settings.chatter_ms),
             mouse: (mode == CaptureMode::Mouse).then(|| MouseState::new(settings.chatter_ms)),
+            hid: None,
+            analog: None,
+            midi: device_viewer == Viewer::Midi,
             pad: (device_viewer == Viewer::Gamepad).then(|| PadState::new(device_pad_id.unwrap_or(usize::MAX))),
             buf: Vec::new(),
             seq: 0,
@@ -204,6 +291,23 @@ impl Session {
         }
     }
 
+    pub fn set_hid(&mut self, layout: Option<Layout>) {
+        self.hid = Some(HidState::new(layout));
+    }
+
+    pub fn set_analog(&mut self, profile: Box<dyn AnalogProfile>) {
+        self.analog = Some(AnalogState { profile, last: Default::default(), raw: HidState::new(None) });
+    }
+
+    pub fn on_midi(&mut self, ts: u64, bytes: &[u8]) {
+        if !self.midi {
+            return;
+        }
+        if let Some(m) = crate::devices::midi::decode(bytes) {
+            self.buf.push(Ev::Midi { kind: m.kind.into(), channel: m.channel, a: m.a, b: m.b, value: m.value, ts: ns_to_ms(ts.saturating_sub(self.started)), text: m.text });
+        }
+    }
+
     pub fn pad_id(&self) -> Option<usize> {
         self.pad.as_ref().map(|p| p.pad)
     }
@@ -244,6 +348,28 @@ impl Session {
     }
 
     pub fn on_hid(&mut self, r: &HidReport) {
+        if let Some(h) = self.hid.as_mut() {
+            h.on_report(r);
+        }
+        if let Some(a) = self.analog.as_mut() {
+            a.raw.on_report(r);
+            let now_down: std::collections::HashMap<&'static str, f32> = a.profile.parse(&r.data).into_iter().collect();
+            let mut changed: Vec<(String, f32)> = vec![];
+            for (k, v) in &now_down {
+                if a.last.get(k).is_none_or(|o| (o - v).abs() > 0.004) {
+                    changed.push((k.to_string(), *v));
+                }
+            }
+            for k in a.last.keys() {
+                if !now_down.contains_key(k) {
+                    changed.push((k.to_string(), 0.0));
+                }
+            }
+            a.last = now_down;
+            if !changed.is_empty() {
+                self.buf.push(Ev::Analog { keys: changed });
+            }
+        }
         if let Some(p) = self.pad.as_mut() {
             if !p.hid_seen {
                 p.hid_seen = true;
@@ -359,6 +485,12 @@ impl Session {
                 }
             }
         }
+        if let Some(h) = self.hid.as_mut() {
+            h.tick(now, &mut self.buf);
+        }
+        if let Some(a) = self.analog.as_mut() {
+            a.raw.tick(now, &mut self.buf);
+        }
         if let Some(p) = self.pad.as_mut() {
             let finished = p.rest.tick(now);
             if now.saturating_sub(p.last_snap) >= SNAP_EVERY {
@@ -383,7 +515,7 @@ impl Session {
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.buf.is_empty() || self.mouse.as_ref().is_some_and(|m| m.n > 0) || self.pad.as_ref().is_some_and(|p| !p.pending.is_empty())
+        !self.buf.is_empty() || self.mouse.as_ref().is_some_and(|m| m.n > 0) || self.pad.as_ref().is_some_and(|p| !p.pending.is_empty()) || self.hid.as_ref().is_some_and(|h| h.fresh) || self.analog.as_ref().is_some_and(|a| a.raw.fresh)
     }
 
     pub fn take_frame(&mut self) -> Option<Frame> {
@@ -395,6 +527,12 @@ impl Session {
                 m.n = 0;
                 self.buf.push(ev);
             }
+        }
+        if let Some(h) = self.hid.as_mut() {
+            h.flush(&mut self.buf);
+        }
+        if let Some(a) = self.analog.as_mut() {
+            a.raw.flush(&mut self.buf);
         }
         if let Some(p) = self.pad.as_mut() {
             if !p.pending.is_empty() {
@@ -439,6 +577,7 @@ pub enum EngineMsg {
     Raw(RawEvent),
     Pad(PadMsg),
     Hid(HidReport),
+    Midi(u64, Vec<u8>),
     Start(Box<StartReq>),
     /// the user asked to leave (exit button)
     End(EndReason),
@@ -457,6 +596,7 @@ pub struct EngineHandle {
 
 struct Live {
     _reader: Option<HidReader>,
+    _midi: Option<Box<dyn std::any::Any + Send>>,
     session: Session,
     sink: Box<dyn FrameSink>,
     capture_disabled: bool,
@@ -535,8 +675,59 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                 let spec = CaptureSpec { mode, window: req.window, disabled: no_capture };
                 match platform.begin_capture(&spec) {
                     Ok(report) => {
-                        let session = Session::new(req.device.clone(), &settings, now);
+                        let mut session = Session::new(req.device.clone(), &settings, now);
+                        let mut hid_info = None;
+                        let mut analog_info = None;
+                        let mut midi_error = None;
+                        let mut midi_conn = None;
+                        let mut generic_reader = None;
+                        match req.device.viewer {
+                            Viewer::Hid => {
+                                let t = tx.clone();
+                                let opened = req.device.hid_paths.first().ok_or("no hid path for this device".to_string()).and_then(|p| HidReader::open(p, move |r| { let _ = t.send(EngineMsg::Hid(r)); }));
+                                match opened {
+                                    Ok(rd) => {
+                                        let layout = (!rd.descriptor.is_empty()).then(|| crate::hid::descriptor::parse(&rd.descriptor));
+                                        let li = layout.as_ref().map(|l| l.info(rd.descriptor.len()));
+                                        session.set_hid(layout.filter(|l| !l.fields.is_empty()));
+                                        hid_info = Some(HidSessionInfo { layout: li, error: None });
+                                        generic_reader = Some(rd);
+                                    }
+                                    Err(e) => {
+                                        session.set_hid(None);
+                                        hid_info = Some(HidSessionInfo { layout: None, error: Some(e) });
+                                    }
+                                }
+                            }
+                            Viewer::Keyboard => {
+                                if let (Some(pid), Some(path)) = (req.device.analog_profile.as_deref(), req.device.analog_path.as_deref()) {
+                                    if let Some(profile) = crate::hid::analog::profile(pid) {
+                                        let verified = profile.verified();
+                                        let t = tx.clone();
+                                        match HidReader::open(path, move |r| { let _ = t.send(EngineMsg::Hid(r)); }) {
+                                            Ok(rd) => {
+                                                session.set_analog(profile);
+                                                analog_info = Some(AnalogInfo { profile: pid.to_string(), verified, error: None });
+                                                generic_reader = Some(rd);
+                                            }
+                                            Err(e) => analog_info = Some(AnalogInfo { profile: pid.to_string(), verified, error: Some(e) }),
+                                        }
+                                    }
+                                }
+                            }
+                            Viewer::Midi => {
+                                let t = tx.clone();
+                                match crate::devices::midi::open(&req.device.name, move |ts, bytes| { let _ = t.send(EngineMsg::Midi(ts, bytes)); }) {
+                                    Ok(c) => midi_conn = Some(c),
+                                    Err(e) => midi_error = Some(e),
+                                }
+                            }
+                            _ => {}
+                        }
                         let info = SessionInfo {
+                            hid: hid_info,
+                            analog: analog_info,
+                            midi_error,
                             device: req.device,
                             mode,
                             exit: exit_info(mode, &settings, no_capture),
@@ -546,7 +737,7 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                             no_capture,
                         };
                         active.store(true, Ordering::SeqCst);
-                        let mut reader = None;
+                        let mut reader = generic_reader;
                         if let Some(pad) = session.pad_id() {
                             let _ = pads.send(PadCmd::Watch(Some(pad)));
                             // the real polling rate comes from hid report timestamps, when the device lets us open it
@@ -555,7 +746,7 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                                 reader = HidReader::open(path, move |r| { let _ = t.send(EngineMsg::Hid(r)); }).ok();
                             }
                         }
-                        live = Some(Live { _reader: reader, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now });
+                        live = Some(Live { _reader: reader, _midi: midi_conn, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now });
                         let _ = req.reply.send(Ok(info));
                     }
                     Err(e) => {
@@ -582,6 +773,11 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
             Ok(EngineMsg::Pad(m)) => {
                 if let Some(l) = live.as_mut() {
                     l.session.on_pad(&m, now);
+                }
+            }
+            Ok(EngineMsg::Midi(ts, bytes)) => {
+                if let Some(l) = live.as_mut() {
+                    l.session.on_midi(ts, &bytes);
                 }
             }
             Ok(EngineMsg::Hid(r)) => {
@@ -993,6 +1189,98 @@ mod tests {
         s.on_pad(&PadMsg::Status(crate::devices::gamepad::PadStatus { pad: 3, force_feedback: true, power: "discharging".into(), battery: Some(55) }), T0);
         let f = s.take_frame().unwrap();
         assert!(f.events.iter().any(|e| matches!(e, Ev::PadInfo { force_feedback: true, battery: Some(55), .. })));
+    }
+
+    fn hid_session() -> Session {
+        let mut s = Session::new(dev(DeviceKind::Hid, Viewer::Hid, vec![]), &SessionSettings::default(), T0);
+        // 8 buttons + one 8-bit x axis, no report ids
+        let desc = [0x05, 0x01, 0x09, 0x04, 0xA1, 0x01, 0x05, 0x09, 0x19, 0x01, 0x29, 0x08, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x08, 0x81, 0x02, 0x05, 0x01, 0x09, 0x30, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x01, 0x81, 0x02, 0xC0];
+        s.set_hid(Some(crate::hid::descriptor::parse(&desc)));
+        s
+    }
+
+    fn report(ts: u64, data: &[u8]) -> HidReport {
+        HidReport { ts, data: data.to_vec() }
+    }
+
+    #[test]
+    fn hid_reports_are_coalesced_decoded_and_changed_bytes_reported() {
+        let mut s = hid_session();
+        s.on_hid(&report(T0, &[0b0000_0001, 10]));
+        s.take_frame();
+        s.on_hid(&report(T0 + MS, &[0b0000_0001, 200]));
+        s.on_hid(&report(T0 + 2 * MS, &[0b0000_0011, 200]));
+        let f = s.take_frame().unwrap();
+        let (changed, n, buttons, axes, bytes) = f.events.iter().find_map(|e| if let Ev::Hid { changed, n, buttons, axes, report, .. } = e { Some((changed.clone(), *n, buttons.clone(), axes.clone(), report.clone())) } else { None }).unwrap();
+        assert_eq!(n, 2, "two reports folded into one event");
+        assert_eq!(changed, vec![0, 1], "both bytes changed within the frame, even though byte 1 settled");
+        assert_eq!(bytes, vec![0b11, 200]);
+        assert!(buttons[0] && buttons[1] && !buttons[2]);
+        assert!((axes[0] - 200.0 / 255.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn identical_reports_flag_no_changed_bytes() {
+        let mut s = hid_session();
+        s.on_hid(&report(T0, &[5, 5]));
+        s.take_frame();
+        s.on_hid(&report(T0 + MS, &[5, 5]));
+        let f = s.take_frame().unwrap();
+        assert!(f.events.iter().any(|e| matches!(e, Ev::Hid { changed, .. } if changed.is_empty())));
+    }
+
+    #[test]
+    fn hid_without_a_parsable_descriptor_still_dumps_raw_bytes() {
+        let mut s = Session::new(dev(DeviceKind::Hid, Viewer::Hid, vec![]), &SessionSettings::default(), T0);
+        s.set_hid(None);
+        s.on_hid(&report(T0, &[1, 2, 3]));
+        let f = s.take_frame().unwrap();
+        assert!(f.events.iter().any(|e| matches!(e, Ev::Hid { report, buttons, axes, .. } if report == &vec![1, 2, 3] && buttons.is_empty() && axes.is_empty())));
+    }
+
+    #[test]
+    fn hid_polling_rate_comes_from_report_timestamps() {
+        let mut s = hid_session();
+        for i in 0..1500u64 {
+            s.on_hid(&report(T0 + i * MS, &[0, (i % 200) as u8]));
+        }
+        s.tick(T0 + 1500 * MS);
+        let hz = s.take_frame().unwrap().events.iter().rev().find_map(|e| if let Ev::Poll(p) = e { p.avg_hz } else { None }).unwrap();
+        assert!((hz - 1000.0).abs() < 5.0);
+    }
+
+    #[test]
+    fn analog_keyboard_depth_changes_are_sent_and_releases_zeroed() {
+        let mut s = Session::new(dev(DeviceKind::Keyboard, Viewer::Keyboard, vec![1]), &SessionSettings::default(), T0);
+        s.set_analog(crate::hid::analog::profile("wooting").unwrap());
+        s.on_hid(&report(T0, &[0x00, 0x1A, 100, 0, 0, 0]));
+        s.on_hid(&report(T0 + MS, &[0x00, 0x1A, 200, 0x00, 0x04, 50, 0, 0, 0]));
+        s.on_hid(&report(T0 + 2 * MS, &[0, 0, 0]));
+        let keys: Vec<(String, f32)> = s.take_frame().unwrap().events.iter().filter_map(|e| if let Ev::Analog { keys } = e { Some(keys.clone()) } else { None }).flatten().collect();
+        assert!(keys.iter().any(|(k, v)| k == "KeyW" && (*v - 100.0 / 255.0).abs() < 0.01));
+        assert!(keys.iter().any(|(k, v)| k == "KeyA" && *v > 0.1));
+        assert!(keys.iter().filter(|(k, v)| (k == "KeyW" || k == "KeyA") && *v == 0.0).count() == 2, "both keys released");
+    }
+
+    #[test]
+    fn analog_sends_the_raw_dump_too() {
+        let mut s = Session::new(dev(DeviceKind::Keyboard, Viewer::Keyboard, vec![1]), &SessionSettings::default(), T0);
+        s.set_analog(crate::hid::analog::profile("wooting").unwrap());
+        s.on_hid(&report(T0, &[9, 9, 9]));
+        assert!(s.take_frame().unwrap().events.iter().any(|e| matches!(e, Ev::Hid { .. })));
+    }
+
+    #[test]
+    fn midi_messages_are_decoded_for_midi_sessions_only() {
+        let mut s = Session::new(dev(DeviceKind::Midi, Viewer::Midi, vec![]), &SessionSettings::default(), T0);
+        s.on_midi(T0 + 5 * MS, &[0x90, 64, 90]);
+        s.on_midi(T0 + 6 * MS, &[0xB0, 1, 33]);
+        let evs = s.take_frame().unwrap().events;
+        assert!(evs.iter().any(|e| matches!(e, Ev::Midi { kind, a: 64, value: 90, .. } if kind == "noteOn")));
+        assert!(evs.iter().any(|e| matches!(e, Ev::Midi { kind, a: 1, value: 33, .. } if kind == "cc")));
+        let mut k = kbd_session();
+        k.on_midi(T0, &[0x90, 1, 1]);
+        assert!(k.take_frame().is_none());
     }
 
     #[test]

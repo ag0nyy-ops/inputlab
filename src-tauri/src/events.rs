@@ -58,6 +58,12 @@ pub enum Ev {
     /// static-ish facts about the pad: rumble support, battery, where the polling rate comes from
     PadInfo { force_feedback: bool, power: String, battery: Option<u8>, poll_source: String },
     Sticks { left: StickSnap, right: StickSnap, rest: RestSnap },
+    /// the latest raw input report of a generic hid device (coalesced per frame).
+    /// `changed` = byte indices that changed since the last frame, `n` = reports folded in.
+    Hid { id: Option<u8>, report: Vec<u8>, changed: Vec<u32>, n: u32, buttons: Vec<bool>, axes: Vec<f32> },
+    /// analog depth (0..1) of keys that changed. keys not listed did not change.
+    Analog { keys: Vec<(String, f32)> },
+    Midi { kind: String, channel: u8, a: u8, b: u8, value: i32, ts: f64, text: String },
     /// progress of an exit hold (0..1). sent whenever it changes.
     Exit { kind: ExitKind, progress: f32 },
     /// a key combo the os ate before we could see it, noticed after the fact
