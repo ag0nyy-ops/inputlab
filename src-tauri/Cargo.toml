@@ -1,6 +1,6 @@
 [package]
 name = "inputlab"
-version = "0.1.0"
+version = "0.1.1"
 description = "native input device tester"
 edition = "2021"
 rust-version = "1.80"

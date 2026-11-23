@@ -1,4 +1,6 @@
-inputlab 0.1.0, the first release. a native desktop input tester: it finds every keyboard, mouse, controller, midi device and hid gadget, shows each one live, and measures polling rate and dpi from real raw input. no accounts, no network, everything stays on your machine.
+inputlab 0.1.1. **if you installed 0.1.0, replace it with this.** on windows 0.1.0 never received any keyboard or mouse input (the window toolkit silently replaced the app's raw input registration), which also made the exit keys dead. fixed here, with hook fallbacks so the exit keys keep working even if raw input ever goes quiet, and the device list now shows one entry per physical device instead of every windows interface.
+
+inputlab is a native desktop input tester: it finds every keyboard, mouse, controller, midi device and hid gadget, shows each one live, and measures polling rate and dpi from real raw input. no accounts, no network, everything stays on your machine.
 
 ## download
 
