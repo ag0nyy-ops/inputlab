@@ -5,7 +5,7 @@
 import { useSyncExternalStore } from 'react';
 import type { AppInfo, DeviceInfo, EndReason, SessionInfo } from './types';
 
-export type Screen = 'home' | 'settings' | 'session';
+export type Screen = 'home' | 'settings' | 'session' | 'summary';
 
 export interface AppState {
   info: AppInfo | null;
@@ -15,6 +15,8 @@ export interface AppState {
   screen: Screen;
   session: SessionInfo | null;
   lastEnd: { reason: EndReason; at: number } | null;
+  /** the session that just finished, for the summary screen */
+  lastSession: { info: SessionInfo; startedAt: number; endedAt: number; reason: EndReason } | null;
 }
 
 let state: AppState = {
@@ -25,6 +27,7 @@ let state: AppState = {
   screen: 'home',
   session: null,
   lastEnd: null,
+  lastSession: null,
 };
 
 const listeners = new Set<() => void>();

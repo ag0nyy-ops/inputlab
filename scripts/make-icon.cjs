@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 // builds the app icon: the dossier eye inside a thin ring on near-black.
 // usage: node scripts/make-icon.cjs  ->  src-tauri/icons/source.png (1024x1024)
 const { chromium } = require('playwright');

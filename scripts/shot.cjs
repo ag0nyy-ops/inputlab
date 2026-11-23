@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 // dev helper: screenshots the ui in chromium. usage: node scripts/shot.cjs <url> <out.png> [w] [h] [clickSelector]
 const { chromium } = require('playwright');
 (async () => {

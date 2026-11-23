@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 //! monotonic clock shared by every backend. all timestamps in rust are
 //! nanoseconds on this clock, so polling math never depends on frame timing.
 

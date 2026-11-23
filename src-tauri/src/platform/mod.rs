@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 //! the os boundary. everything above this module (engine, commands, frontend)
 //! only knows the `Platform` trait and the platform-neutral `RawEvent`.
 

@@ -1,0 +1,77 @@
+# inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
+# push a tag like v0.1.0 and this builds the installers and attaches them to a draft release.
+# windows is the primary target. macos and linux build as "experimental": a failure there
+# does not stop the windows release.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows (msi + exe)
+            os: windows-latest
+            args: --bundles msi,nsis
+            experimental: false
+          - name: macos arm64 (dmg, experimental)
+            os: macos-latest
+            args: --target aarch64-apple-darwin --bundles dmg
+            rust_targets: aarch64-apple-darwin
+            experimental: true
+          - name: macos x64 (dmg, experimental)
+            os: macos-13
+            args: --target x86_64-apple-darwin --bundles dmg
+            rust_targets: x86_64-apple-darwin
+            experimental: true
+          - name: linux (appimage + deb, experimental)
+            os: ubuntu-22.04
+            args: --bundles appimage,deb
+            experimental: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libudev-dev libasound2-dev libssl-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: build installers and attach them to the draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: inputlab ${{ github.ref_name }}
+          releaseBody: |
+            unsigned builds. windows may show a smartscreen warning the first time: more info, then run anyway.
+            start with `--no-capture` if you want to look around before testing anything. see the readme for the exit rules.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

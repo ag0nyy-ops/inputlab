@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 //! one table maps physical keys across every os. the frontend only ever sees
 //! the dom-style `code` string (KeyA, ShiftLeft, Numpad5), so layouts and the
 //! tested-key tracker never depend on windows scancodes or evdev numbers.

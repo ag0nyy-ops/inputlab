@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 //! tauri commands. thin: they validate, then hand off to the hub / engine.
 
 use std::sync::atomic::Ordering;

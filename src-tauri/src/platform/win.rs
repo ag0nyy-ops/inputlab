@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 //! windows: raw input (WM_INPUT) on a dedicated time-critical thread, low-level
 //! hooks for capture, ClipCursor for the mouse, QueryPerformanceCounter for time.
 //!

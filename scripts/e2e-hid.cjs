@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 // dev check: generic hid, midi, analog keyboard against the dev mock.
 const { chromium } = require('playwright');
 const assert = require('assert');

@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 //! sensor checks from raw movement: slow-circle smoothness (jitter) and angle
 //! snapping, plus per-button click timing. these measure; they do not grade.
 //! there is no calibrated pass/fail for jitter, so the ui shows numbers to

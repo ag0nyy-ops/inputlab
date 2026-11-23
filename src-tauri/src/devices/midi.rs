@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 //! midi input ports via midir. listing only here; connecting happens in a session.
 
 use midir::MidiInput;

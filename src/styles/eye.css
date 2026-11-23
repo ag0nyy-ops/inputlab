@@ -129,3 +129,12 @@
   }
   [data-fx="low"] .eye__fibers, [data-fx="low"] .eye__lashes { display: none; }
 }
+
+@layer motion {
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      .rule { animation: jdx-draw linear both; animation-timeline: view(); animation-range: entry 0% entry 90%; }
+      @keyframes jdx-draw { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    }
+  }
+}

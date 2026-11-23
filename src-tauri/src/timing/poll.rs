@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 //! polling rate from raw report timestamps. every number here comes from the
 //! nanosecond timestamps of the reports themselves, never from frame timing,
 //! so it stays accurate for 2k, 4k and 8k mice as long as the os delivers them.

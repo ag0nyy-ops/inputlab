@@ -31,7 +31,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["msi", "nsis", "dmg", "appimage", "deb"],
     "category": "Utility",
     "shortDescription": "native input device tester",
     "longDescription": "detects every connected input device, shows live state, and benchmarks polling rate and dpi from raw input. everything stays local.",

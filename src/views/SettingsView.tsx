@@ -1,5 +1,6 @@
 // inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { fitCanvas } from '../lib/draw';
 import { resetSettings, updateSettings, useSettings } from '../lib/settings';
 
 function NumberField({ label, value, min, max, unit, onValid, hint }: { label: string; value: number; min: number; max: number; unit: string; hint: string; onValid: (n: number) => void }) {
@@ -47,6 +48,23 @@ export function SettingsView() {
       <NumberField label="esc hold (mouse tests)" value={s.escHoldMs} min={300} max={5000} unit="ms" hint="how long esc is held to leave a mouse test. 300 to 5000." onValid={(n) => updateSettings({ escHoldMs: n })} />
       <NumberField label="exit combo hold (keyboard tests)" value={s.comboHoldMs} min={500} max={6000} unit="ms" hint="how long ctrl+alt+shift+backspace is held. 500 to 6000." onValid={(n) => updateSettings({ comboHoldMs: n })} />
 
+      <NumberField label="chatter threshold" value={s.chatterMs} min={5} max={200} unit="ms" hint="a key or button that comes back faster than this after release counts as chatter. 5 to 200." onValid={(n) => updateSettings({ chatterMs: n })} />
+
+      <div className="field">
+        <span className="label">dpi test distance</span>
+        <div style={{ display: 'flex', gap: '.8rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <DistanceInput />
+          <div className="seg" role="group" aria-label="distance unit">
+            {(['in', 'cm'] as const).map((u) => (
+              <button key={u} aria-pressed={s.distanceUnit === u} onClick={() => updateSettings({ distanceUnit: u, dpiDistance: u === 'in' ? 2 : 5 })}>{u === 'in' ? 'inches' : 'centimetres'}</button>
+            ))}
+          </div>
+        </div>
+        <p className="case__sub">default is 2 in or 5 cm. a longer move averages out your hand.</p>
+      </div>
+
+      <RulerCalibration />
+
       <div className="field">
         <span className="label">sight</span>
         <div className="seg" role="group" aria-label="visual effects">
@@ -61,5 +79,45 @@ export function SettingsView() {
 
       <div><button className="btn" onClick={resetSettings}>reset to defaults</button></div>
     </article>
+  );
+}
+
+function DistanceInput() {
+  const s = useSettings();
+  const [text, setText] = useState(String(s.dpiDistance));
+  const n = Number(text);
+  const bad = !Number.isFinite(n) || n < 0.5 || n > 40;
+  return (
+    <div className="field">
+      <label className="sr" htmlFor="dpi-dist">distance</label>
+      <input id="dpi-dist" className="input" style={{ maxWidth: '8rem' }} inputMode="decimal" value={text} aria-invalid={bad} onChange={(e) => { setText(e.target.value); const v = Number(e.target.value); if (Number.isFinite(v) && v >= 0.5 && v <= 40) updateSettings({ dpiDistance: v }); }} />
+      {bad && <p className="err" role="alert"><span className="err__tag">ERR</span><span>0.5 to 40.</span></p>}
+    </div>
+  );
+}
+
+/** hold a real ruler to the screen and stretch this one until they match: it sets css px per inch */
+function RulerCalibration() {
+  const s = useSettings();
+  const cv = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const W = 640, h = 56;
+    const { ctx } = fitCanvas(cv.current!, W, h);
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, h);
+    ctx.strokeStyle = '#ececec'; ctx.fillStyle = '#ececec'; ctx.font = '10px "IBM Plex Mono", monospace'; ctx.textAlign = 'center';
+    for (let u = 0; u * (s.rulerPxPerInch / 8) < W - 20; u++) {
+      const x = 10 + (u * s.rulerPxPerInch) / 8;
+      const major = u % 8 === 0;
+      ctx.beginPath(); ctx.moveTo(x + 0.5, 4); ctx.lineTo(x + 0.5, 4 + (major ? 24 : u % 4 === 0 ? 16 : 9)); ctx.stroke();
+      if (major) ctx.fillText(String(u / 8), x, 44);
+    }
+  }, [s.rulerPxPerInch]);
+  return (
+    <div className="field">
+      <label className="label" htmlFor="ruler">on-screen ruler size · {s.rulerPxPerInch} px per inch</label>
+      <input id="ruler" className="range" type="range" min="60" max="220" step="1" value={s.rulerPxPerInch} onChange={(e) => updateSettings({ rulerPxPerInch: Number(e.target.value) })} />
+      <canvas ref={cv} className="mv__ruler" role="img" aria-label="calibration ruler" />
+      <p className="case__sub">hold a real ruler to the screen and slide until the inch marks line up. only the on-screen guide in the dpi test uses this; the dpi result never does.</p>
+    </div>
   );
 }

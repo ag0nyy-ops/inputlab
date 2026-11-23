@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 //! the engine owns the one active test session. it receives every raw event,
 //! runs the exit rules and the math, and flushes batched frames to the ui.
 //! `Session` is pure (no threads, no os calls) so it can be tested with

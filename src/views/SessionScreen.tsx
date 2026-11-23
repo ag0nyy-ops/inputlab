@@ -13,6 +13,7 @@ import { SessionBody } from './SessionBody';
 
 export function SessionScreen() {
   const s = useStore((st) => st.session);
+  const gone = useStore((st) => st.session !== null && st.devices.some((d) => d.id === st.session!.device.id && !d.connected));
 
   useEffect(() => {
     // in a session no key may do its normal thing. rust/the os layer blocks it at the lowest
@@ -38,7 +39,7 @@ export function SessionScreen() {
           <h1 className="title title--sm">{s.device.name}</h1>
         </div>
         <div className="session__stamps">
-          <Stamp>live</Stamp>
+          {gone ? <Stamp tone="problem">unplugged</Stamp> : <Stamp>live</Stamp>}
           {c.cursorClipped && <Stamp size="sm">cursor locked</Stamp>}
           {c.mouseSwallowed && <Stamp size="sm">clicks swallowed</Stamp>}
           {c.keyboardHooked && <Stamp size="sm">shortcuts blocked</Stamp>}

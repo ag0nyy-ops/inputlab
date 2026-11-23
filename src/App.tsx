@@ -10,6 +10,7 @@ import { DeviceList } from './views/DeviceList';
 import { DevicePanel } from './views/DevicePanel';
 import { SessionScreen } from './views/SessionScreen';
 import { SettingsView } from './views/SettingsView';
+import { SummaryView } from './views/SummaryView';
 
 export function App() {
   const info = useStore((s) => s.info);
@@ -53,7 +54,7 @@ export function App() {
       <div className="shell">
         <DeviceList />
         <main id="main" className="main scroll">
-          {screen === 'settings' ? <SettingsView /> : <DevicePanel />}
+          {screen === 'settings' ? <SettingsView /> : screen === 'summary' ? <SummaryView /> : <DevicePanel />}
         </main>
       </div>
     </div>

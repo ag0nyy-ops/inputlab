@@ -1,3 +1,4 @@
+// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab
 //! device model + the pure logic that merges every backend's findings into
 //! one list. scanning (the io part) lives in `hub`; merging lives here so it
 //! can be unit tested with fake inputs.

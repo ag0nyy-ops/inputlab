@@ -103,3 +103,7 @@
   .hexdump { width: 100%; }
   .hexdump canvas { border: 1px solid var(--line-strong); max-width: 100%; }
 }
+
+@layer components {
+  .summary__text { font: 400 .85rem/1.55 var(--mono); white-space: pre-wrap; border: 1px solid var(--line-strong); background: var(--bg-2); padding: 14px 16px; user-select: text; max-height: 22rem; overflow: auto; }
+}
