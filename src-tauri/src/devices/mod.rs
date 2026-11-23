@@ -433,6 +433,21 @@ pub fn build_device_list(inp: &ScanInputs) -> Vec<DeviceInfo> {
         out.push(merged);
     }
 
+    // a laptop touchpad is two things to windows: a pointing device (no usb ids, named by its acpi id)
+    // and a hid-over-i2c device with the real ids. same physical thing: fold the hid side in.
+    if let Some(ti) = out.iter().position(|d| d.kind == DeviceKind::Mouse && d.name == "laptop touchpad") {
+        let mut folded = 0;
+        for d in out.iter_mut() {
+            let digitizer = d.note.as_deref().is_some_and(|n| n.starts_with("usage 000d:"));
+            let i2c = d.name.to_lowercase().contains("i2c");
+            if d.kind == DeviceKind::Hid && d.backend == "hidapi" && d.usable && (i2c || digitizer) {
+                *d = hide(d.clone(), "the hid interface of the laptop touchpad");
+                folded += 1;
+            }
+        }
+        out[ti].hidden_interfaces += folded;
+    }
+
     // 4. midi
     for name in &inp.midi {
         out.push(DeviceInfo::base(format!("midi-{name}"), name.clone(), DeviceKind::Midi, Viewer::Midi, "midir"));
@@ -623,6 +638,26 @@ mod tests {
         assert_eq!(vis[0].name, "laptop keyboard");
         assert_eq!(vis[0].srcs, vec![1, 2], "events from both ite endpoints reach it");
         assert!(list.iter().any(|d| d.id == "kbd-sys" && !d.usable));
+    }
+
+    #[test]
+    fn the_touchpads_hid_side_is_folded_into_the_laptop_touchpad() {
+        let mut i = inputs();
+        i.raw = vec![RawDevice { src: 1, kind: DeviceKind::Mouse, path: r"\\?\HID#ELAN06FA&Col01#5&1#{a}".into(), vid: None, pid: None }];
+        i.hid = vec![hid(0x04f3, 0x3186, 0x0d, 0x05, 0, "HIDI2C Device")];
+        let list = build_device_list(&i);
+        let vis = visible(&list);
+        assert_eq!(vis.len(), 1);
+        assert_eq!(vis[0].name, "laptop touchpad");
+        assert_eq!(vis[0].hidden_interfaces, 1);
+        assert!(list.iter().any(|d| d.name == "HIDI2C Device" && !d.usable));
+    }
+
+    #[test]
+    fn a_standalone_i2c_device_without_a_touchpad_is_left_alone() {
+        let mut i = inputs();
+        i.hid = vec![hid(0x04f3, 0x3186, 0x0d, 0x05, 0, "HIDI2C Device")];
+        assert_eq!(visible(&build_device_list(&i)).len(), 1);
     }
 
     #[test]
