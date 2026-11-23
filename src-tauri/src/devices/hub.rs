@@ -80,9 +80,26 @@ impl Hub {
     }
 
     fn scan_inputs(&self) -> ScanInputs {
+        #[allow(unused_mut)]
+        let mut hid = hid::enumerate();
+        // debug builds only: INPUTLAB_FAKE_DEVICES=1 adds a fake hid device so the session
+        // path can be exercised on a machine with no hardware (ci, containers).
+        #[cfg(debug_assertions)]
+        if std::env::var("INPUTLAB_FAKE_DEVICES").is_ok() {
+            hid.push(hid::HidInfo {
+                path: "fake".into(),
+                vid: 0xFFFF,
+                pid: 0x0001,
+                product: Some("fake hid gadget (debug)".into()),
+                manufacturer: None,
+                usage_page: 0xFF00,
+                usage: 1,
+                interface: 0,
+            });
+        }
         ScanInputs {
             raw: self.platform.enumerate_raw(),
-            hid: hid::enumerate(),
+            hid,
             pads: self.pads.snapshot(),
             midi: midi::list_ports(),
             raw_backend: self.platform.raw_backend().to_string(),

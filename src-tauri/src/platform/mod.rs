@@ -114,6 +114,8 @@ pub trait Platform: Send + Sync {
     /// must be idempotent and must never fail: it is the safety net.
     fn end_capture(&self);
     fn is_app_foreground(&self) -> bool;
+    /// re-assert capture state (cursor clip can be reset by the os). cheap, called ~4x/s.
+    fn refresh_capture(&self) {}
     fn reserved_combos(&self) -> Vec<ReservedCombo>;
     fn key_labels(&self) -> Option<KeyLabels> {
         None

@@ -1716,6 +1716,7 @@ dependencies = [
  "evdev",
  "gilrs",
  "hidapi",
+ "libc",
  "midir",
  "serde",
  "serde_json",

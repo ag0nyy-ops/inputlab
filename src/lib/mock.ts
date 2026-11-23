@@ -2,7 +2,7 @@
 // dev-only fake backend. imported behind import.meta.env.DEV, so it never ships.
 // url switches: ?empty=1  ?state=offline (no raw input)  ?os=macos|linux  ?many=1
 
-import type { AppInfo, DeviceInfo, DeviceListMsg } from './types';
+import type { AppInfo, CaptureMode, DeviceInfo, DeviceListMsg, Ev, Frame, SessionInfo, SessionSettings } from './types';
 import type { Bridge } from './bridge';
 
 const q = new URLSearchParams(location.search);
@@ -52,8 +52,86 @@ export function mockBridge(): Bridge {
     noCapture: q.get('nocapture') === '1',
     hidError: null,
   };
+  // fake session: the browser keyboard stands in for raw input, with the same exit rules as rust
+  let timer = 0;
+  let stop = () => {};
+  let endNow: ((e: Ev & { t: 'ended' }) => void) | null = null;
+  let activeMode: CaptureMode = 'other';
+  const modeOf = (d: DeviceInfo): CaptureMode => (d.viewer === 'mouse' ? 'mouse' : d.viewer === 'keyboard' ? 'keyboard' : 'other');
   return {
     appInfo: async () => info,
+    async startSession(deviceId, settings: SessionSettings, onFrame: (f: Frame) => void) {
+      const device = devices().find((d) => d.id === deviceId)!;
+      const mode = modeOf(device);
+      activeMode = mode;
+      const noCapture = info.noCapture;
+      const down = new Set<string>();
+      let since = 0;
+      let last = 0;
+      let seq = 0;
+      let buf: Ev[] = [];
+      const t0 = performance.now();
+      const holdMs = mode === 'mouse' ? settings.escHoldMs : settings.comboHoldMs;
+      const cond = () => (mode === 'mouse' ? down.has('Escape') : mode === 'keyboard' ? ['Control', 'Alt', 'Shift'].every((m) => [...down].some((k) => k.startsWith(m))) && down.has('Backspace') : false);
+      const onKey = (e: KeyboardEvent, isDown: boolean) => {
+        e.preventDefault();
+        if (isDown) down.add(e.code); else down.delete(e.code);
+        if (mode === 'keyboard') buf.push({ t: 'key', code: e.code, down: isDown, ts: performance.now() - t0 });
+        if (cond()) since ||= performance.now(); else since = 0;
+      };
+      const kd = (e: KeyboardEvent) => onKey(e, true);
+      const ku = (e: KeyboardEvent) => onKey(e, false);
+      addEventListener('keydown', kd);
+      addEventListener('keyup', ku);
+      const end = (reason: Ev & { t: 'ended' }) => {
+        buf.push(reason);
+        flush();
+        stop();
+      };
+      const flush = () => {
+        if (buf.length) onFrame({ seq: ++seq, events: buf.splice(0) });
+      };
+      endNow = end;
+      stop = () => {
+        endNow = null;
+        clearInterval(timer);
+        removeEventListener('keydown', kd);
+        removeEventListener('keyup', ku);
+        stop = () => {};
+      };
+      timer = window.setInterval(() => {
+        if (mode !== 'other') {
+          const p = since ? Math.min(1, (performance.now() - since) / holdMs) : 0;
+          if (p !== last) {
+            last = p;
+            buf.push({ t: 'exit', kind: mode === 'mouse' ? 'esc' : 'combo', progress: p });
+          }
+          if (p >= 1) return end({ t: 'ended', reason: mode === 'mouse' ? 'esc-hold' : 'combo' });
+        }
+        flush();
+      }, 16);
+      const info2: SessionInfo = {
+        device,
+        mode,
+        exit: { kind: mode === 'mouse' ? 'esc' : mode === 'keyboard' ? 'combo' : null, holdMs: mode === 'mouse' ? settings.escHoldMs : settings.comboHoldMs, button: mode !== 'mouse' || noCapture, combo: mode === 'keyboard' ? ['ControlLeft', 'AltLeft', 'ShiftLeft', 'Backspace'] : [] },
+        capture: noCapture
+          ? { active: false, cursorClipped: false, keyboardHooked: false, mouseSwallowed: false, warnings: ['--no-capture is on: nothing is clipped, hooked or swallowed.'] }
+          : { active: true, cursorClipped: mode === 'mouse', keyboardHooked: mode !== 'mouse', mouseSwallowed: mode === 'mouse', warnings: [] },
+        reserved: [
+          { label: 'ctrl + alt + del', keys: ['ControlLeft', 'AltLeft', 'Delete'], why: 'handled by windows before any app can see it' },
+          { label: 'win + l', keys: ['MetaLeft', 'KeyL'], why: 'locks the pc, no hook can stop it' },
+        ],
+        comboWarning: q.get('combowarn') ? 'your desktop treats ctrl+alt+backspace as a session kill. only the on-screen exit button is guaranteed.' : null,
+        noCapture,
+      };
+      return info2;
+    },
+    async endSession() {
+      // mirrors the engine: the button never ends a mouse session
+      if (activeMode === 'mouse' && !info.noCapture) return;
+      endNow?.({ t: 'ended', reason: 'exit-button' });
+    },
+    heartbeat: async () => {},
     subscribeDevices(cb) {
       const msg: DeviceListMsg = { devices: devices() };
       const t = setTimeout(() => cb(msg), 60);

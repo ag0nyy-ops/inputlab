@@ -8,9 +8,12 @@ import { setState, useStore } from './lib/store';
 import { backendLabel } from './lib/format';
 import { DeviceList } from './views/DeviceList';
 import { DevicePanel } from './views/DevicePanel';
+import { SessionScreen } from './views/SessionScreen';
+import { SettingsView } from './views/SettingsView';
 
 export function App() {
   const info = useStore((s) => s.info);
+  const screen = useStore((s) => s.screen);
 
   useEffect(() => {
     let off = () => {};
@@ -29,6 +32,8 @@ export function App() {
     };
   }, []);
 
+  if (screen === 'session') return <SessionScreen />;
+
   return (
     <div className="app">
       <header className="top">
@@ -41,11 +46,14 @@ export function App() {
             {info.noCapture && <Stamp tone="wip" size="sm">no capture</Stamp>}
           </div>
         )}
+        <button className="btn btn--sm" onClick={() => setState({ screen: screen === 'settings' ? 'home' : 'settings' })} aria-pressed={screen === 'settings'}>
+          settings
+        </button>
       </header>
       <div className="shell">
         <DeviceList />
         <main id="main" className="main scroll">
-          <DevicePanel />
+          {screen === 'settings' ? <SettingsView /> : <DevicePanel />}
         </main>
       </div>
     </div>

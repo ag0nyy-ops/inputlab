@@ -1,0 +1,26 @@
+/* inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab */
+
+@layer layout {
+  .session { height: 100%; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; background: var(--bg); }
+  .session__top { display: flex; justify-content: space-between; align-items: end; gap: 1rem; flex-wrap: wrap; padding: 1rem var(--gutter) .8rem; border-bottom: 1px solid var(--line-strong); }
+  .session__stamps { display: flex; gap: .7rem; align-items: center; flex-wrap: wrap; }
+  .session__notes { display: grid; gap: .5rem; padding: 0 var(--gutter); }
+  .session__notes:not(:empty) { padding-top: .6rem; }
+  .session__body { min-height: 0; min-width: 0; padding: clamp(12px, 2vw, 24px) var(--gutter); overflow: auto; }
+  .session__exit { display: flex; align-items: center; gap: 1.2rem; padding: 14px var(--gutter); border-top: 1px solid var(--line-strong); background: var(--bg); }
+  .session__hint { flex: 1; min-width: 0; }
+  .session__hint .label { line-height: 1.8; }
+
+  .ring { width: 64px; height: 64px; flex: none; }
+  .ring circle:nth-child(2) { transition: stroke-dashoffset .06s linear; }
+
+  .monitor { display: grid; gap: .6rem; min-height: 0; }
+  .monitor__log { font: 400 .82rem/1.5 var(--mono); color: var(--fg); white-space: pre; overflow: hidden; min-height: 12rem; }
+
+  .kbd { font: 600 .68rem/1 var(--mono); letter-spacing: .1em; padding: .22rem .45rem; border: 1px solid var(--fg); color: var(--fg); margin: 0 .1rem; }
+}
+
+@layer components {
+  /* mouse sessions: the cursor is hidden everywhere */
+  body.capturing-mouse, body.capturing-mouse * { cursor: none !important; }
+}

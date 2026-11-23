@@ -3,9 +3,9 @@
 // selection, screen). high-rate device data never goes through here.
 
 import { useSyncExternalStore } from 'react';
-import type { AppInfo, DeviceInfo } from './types';
+import type { AppInfo, DeviceInfo, EndReason, SessionInfo } from './types';
 
-export type Screen = 'home' | 'settings';
+export type Screen = 'home' | 'settings' | 'session';
 
 export interface AppState {
   info: AppInfo | null;
@@ -13,6 +13,8 @@ export interface AppState {
   devicesLoaded: boolean;
   selectedId: string | null;
   screen: Screen;
+  session: SessionInfo | null;
+  lastEnd: { reason: EndReason; at: number } | null;
 }
 
 let state: AppState = {
@@ -21,6 +23,8 @@ let state: AppState = {
   devicesLoaded: false,
   selectedId: null,
   screen: 'home',
+  session: null,
+  lastEnd: null,
 };
 
 const listeners = new Set<() => void>();

@@ -64,7 +64,7 @@ pub struct DeviceInfo {
 }
 
 impl DeviceInfo {
-    fn base(id: String, name: String, kind: DeviceKind, viewer: Viewer, backend: &str) -> Self {
+    pub(crate) fn base(id: String, name: String, kind: DeviceKind, viewer: Viewer, backend: &str) -> Self {
         Self {
             id,
             name,
