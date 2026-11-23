@@ -992,6 +992,10 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                     // resent every second even when unchanged: the first copy can land before the
                     // session screen exists, and the line must never stay blank
                     if t != l.last_stats || now.saturating_sub(l.last_stats_at) >= 1000 * MS {
+                        // dev builds also print it, so a capture problem can be followed from a terminal
+                        if cfg!(debug_assertions) && t != l.last_stats {
+                            eprintln!("[inputlab capture] {t}");
+                        }
                         l.last_stats = t.clone();
                         l.last_stats_at = now;
                         l.session.push(Ev::Capture { text: t });
