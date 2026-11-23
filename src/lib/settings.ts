@@ -6,6 +6,8 @@ import { useSyncExternalStore } from 'react';
 export interface Settings {
   escHoldMs: number;
   comboHoldMs: number;
+  /** release->press gap under this many ms counts as switch chatter */
+  chatterMs: number;
   distanceUnit: 'in' | 'cm';
   /** physical distance of the dpi test, in `distanceUnit` */
   dpiDistance: number;
@@ -17,6 +19,7 @@ export interface Settings {
 export const defaults: Settings = {
   escHoldMs: 1000,
   comboHoldMs: 1500,
+  chatterMs: 30,
   distanceUnit: 'in',
   dpiDistance: 2,
   rulerPxPerInch: 96,

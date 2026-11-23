@@ -67,6 +67,9 @@ export function mockBridge(): Bridge {
       const noCapture = info.noCapture;
       const down = new Set<string>();
       let since = 0;
+      let maxHeld = 0;
+      const downAt: Record<string, number> = {};
+      const lastUpAt: Record<string, number> = {};
       let last = 0;
       let seq = 0;
       let buf: Ev[] = [];
@@ -75,8 +78,16 @@ export function mockBridge(): Bridge {
       const cond = () => (mode === 'mouse' ? down.has('Escape') : mode === 'keyboard' ? ['Control', 'Alt', 'Shift'].every((m) => [...down].some((k) => k.startsWith(m))) && down.has('Backspace') : false);
       const onKey = (e: KeyboardEvent, isDown: boolean) => {
         e.preventDefault();
+        const wasDown = down.has(e.code);
         if (isDown) down.add(e.code); else down.delete(e.code);
-        if (mode === 'keyboard') buf.push({ t: 'key', code: e.code, down: isDown, ts: performance.now() - t0 });
+        if (mode === 'keyboard' && !(isDown && wasDown)) {
+          const now = performance.now();
+          let hold: number | null = null, gap: number | null = null;
+          if (isDown) { gap = lastUpAt[e.code] != null ? now - lastUpAt[e.code]! : null; downAt[e.code] = now; }
+          else { hold = downAt[e.code] != null ? now - downAt[e.code]! : null; lastUpAt[e.code] = now; }
+          buf.push({ t: 'key', code: e.code, down: isDown, ts: now - t0, hold, gap, chatter: gap !== null && gap < settings.chatterMs, held: down.size, max: Math.max(maxHeld, down.size) });
+          maxHeld = Math.max(maxHeld, down.size);
+        }
         if (cond()) since ||= performance.now(); else since = 0;
       };
       const kd = (e: KeyboardEvent) => onKey(e, true);
@@ -132,6 +143,8 @@ export function mockBridge(): Bridge {
       endNow?.({ t: 'ended', reason: 'exit-button' });
     },
     heartbeat: async () => {},
+    command: async () => {},
+    keyLabels: async () => null,
     subscribeDevices(cb) {
       const msg: DeviceListMsg = { devices: devices() };
       const t = setTimeout(() => cb(msg), 60);

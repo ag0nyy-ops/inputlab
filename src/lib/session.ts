@@ -6,12 +6,19 @@
 import { getBridge } from './bridge';
 import { getSettings } from './settings';
 import { setState } from './store';
-import type { EndReason, Ev, Frame, SessionInfo } from './types';
+import type { EndReason, Ev, Frame, SessionCommand, SessionInfo } from './types';
 
 type Listener = (events: Ev[]) => void;
 
 const listeners = new Set<Listener>();
 let heartbeat = 0;
+const stopHooks = new Set<() => void>();
+function stopped(): void {
+  stopHooks.forEach((h) => h());
+}
+export function onSessionEnd(h: () => void): void {
+  stopHooks.add(h);
+}
 
 export function onFrame(l: Listener): () => void {
   listeners.add(l);
@@ -27,13 +34,14 @@ function dispatch(f: Frame): void {
 function teardown(reason: EndReason): void {
   clearInterval(heartbeat);
   document.body.classList.remove('capturing-mouse', 'capturing');
+  stopped();
   setState({ session: null, lastEnd: { reason, at: Date.now() }, screen: 'home' });
 }
 
 export async function startSession(deviceId: string): Promise<SessionInfo> {
   const b = await getBridge();
   const s = getSettings();
-  const info = await b.startSession(deviceId, { escHoldMs: s.escHoldMs, comboHoldMs: s.comboHoldMs }, dispatch);
+  const info = await b.startSession(deviceId, { escHoldMs: s.escHoldMs, comboHoldMs: s.comboHoldMs, chatterMs: s.chatterMs }, dispatch);
   document.body.classList.add('capturing');
   if (info.mode === 'mouse') document.body.classList.add('capturing-mouse');
   // rust ends the session itself if these stop (a frozen ui can never trap the user)
@@ -43,6 +51,11 @@ export async function startSession(deviceId: string): Promise<SessionInfo> {
 }
 
 /// the exit button. rust refuses this in mouse sessions.
+export async function sendCommand(cmd: SessionCommand): Promise<void> {
+  const b = await getBridge();
+  await b.command(cmd);
+}
+
 export async function endSession(): Promise<void> {
   const b = await getBridge();
   await b.endSession();

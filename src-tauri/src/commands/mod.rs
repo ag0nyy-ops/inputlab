@@ -12,7 +12,7 @@ use tauri::{State, WebviewWindow};
 use crate::capture::SessionSettings;
 use crate::devices::hub::{DeviceListMsg, Hub};
 use crate::devices::Viewer;
-use crate::engine::{EngineHandle, EngineMsg, SessionInfo, StartReq};
+use crate::engine::{EngineHandle, EngineMsg, SessionCommand, SessionInfo, StartReq};
 use crate::events::{EndReason, Frame};
 use crate::platform::{KeyLabels, Platform, PlatformCaps};
 
@@ -95,6 +95,11 @@ pub fn end_session(state: State<'_, AppState>) {
 #[tauri::command]
 pub fn session_heartbeat(state: State<'_, AppState>) {
     let _ = state.engine.tx.send(EngineMsg::Heartbeat);
+}
+
+#[tauri::command]
+pub fn session_command(state: State<'_, AppState>, cmd: SessionCommand) {
+    let _ = state.engine.tx.send(EngineMsg::Command(cmd));
 }
 
 #[tauri::command]

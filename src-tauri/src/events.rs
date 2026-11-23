@@ -28,7 +28,9 @@ pub enum EndReason {
 #[serde(tag = "t", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Ev {
     /// a physical key changed state on the device under test. `ts` is ms since session start.
-    Key { code: &'static str, down: bool, ts: f64 },
+    /// hold: ms held (on release). gap: ms since last release of this key (on press).
+    /// chatter: the press came back faster than the threshold. held/max: keys down now / most ever.
+    Key { code: &'static str, down: bool, ts: f64, hold: Option<f64>, gap: Option<f64>, chatter: bool, held: u32, max: u32 },
     /// progress of an exit hold (0..1). sent whenever it changes.
     Exit { kind: ExitKind, progress: f32 },
     /// a key combo the os ate before we could see it, noticed after the fact

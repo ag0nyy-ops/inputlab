@@ -3,7 +3,7 @@
 // dev mock can stand in when the app runs in a plain browser.
 
 import { Channel, invoke } from '@tauri-apps/api/core';
-import type { AppInfo, DeviceListMsg, Frame, SessionInfo, SessionSettings } from './types';
+import type { AppInfo, DeviceListMsg, Frame, KeyLabels, SessionCommand, SessionInfo, SessionSettings } from './types';
 
 export const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -14,6 +14,8 @@ export interface Bridge {
   startSession(deviceId: string, settings: SessionSettings, onFrame: (f: Frame) => void): Promise<SessionInfo>;
   endSession(): Promise<void>;
   heartbeat(): Promise<void>;
+  command(cmd: SessionCommand): Promise<void>;
+  keyLabels(): Promise<KeyLabels | null>;
 }
 
 const real: Bridge = {
@@ -34,6 +36,8 @@ const real: Bridge = {
   },
   endSession: () => invoke('end_session'),
   heartbeat: () => invoke('session_heartbeat'),
+  command: (cmd) => invoke('session_command', { cmd }),
+  keyLabels: () => invoke<KeyLabels | null>('key_labels'),
 };
 
 let cached: Bridge | null = null;

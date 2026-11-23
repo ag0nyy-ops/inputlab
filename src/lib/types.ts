@@ -76,7 +76,7 @@ export interface SessionInfo {
 export type EndReason = 'exit-button' | 'esc-hold' | 'combo' | 'focus-lost' | 'watchdog' | 'ui-gone' | 'shutdown';
 
 export type Ev =
-  | { t: 'key'; code: string; down: boolean; ts: number }
+  | { t: 'key'; code: string; down: boolean; ts: number; hold: number | null; gap: number | null; chatter: boolean; held: number; max: number }
   | { t: 'exit'; kind: ExitKind; progress: number }
   | { t: 'reserved'; label: string }
   | { t: 'ended'; reason: EndReason };
@@ -89,4 +89,12 @@ export interface Frame {
 export interface SessionSettings {
   escHoldMs: number;
   comboHoldMs: number;
+  chatterMs: number;
+}
+
+export type SessionCommand = { type: 'resetKeys' };
+
+export interface KeyLabels {
+  layout_name: string;
+  labels: [string, string][];
 }

@@ -1,6 +1,8 @@
 //! monotonic clock shared by every backend. all timestamps in rust are
 //! nanoseconds on this clock, so polling math never depends on frame timing.
 
+pub mod keystats;
+
 use std::sync::OnceLock;
 use std::time::Instant;
 

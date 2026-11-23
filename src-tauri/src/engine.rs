@@ -19,6 +19,7 @@ use crate::devices::{DeviceInfo, Viewer};
 use crate::events::{EndReason, Ev, Frame};
 use crate::keys;
 use crate::platform::{CaptureMode, CaptureReport, CaptureSpec, Platform, RawEvent, RawSink, ReservedCombo, SrcId};
+use crate::timing::keystats::KeyTracker;
 use crate::timing::{now_ns, ns_to_ms};
 
 const MS: u64 = 1_000_000;
@@ -70,6 +71,7 @@ pub struct Session {
     last_heartbeat: u64,
     last_exit_progress: f32,
     all_down: HashSet<&'static str>,
+    keys: KeyTracker,
     buf: Vec<Ev>,
     seq: u64,
 }
@@ -86,6 +88,7 @@ impl Session {
             last_heartbeat: now,
             last_exit_progress: 0.0,
             all_down: HashSet::new(),
+            keys: KeyTracker::new(settings.chatter_ms),
             buf: Vec::new(),
             seq: 0,
         }
@@ -107,7 +110,9 @@ impl Session {
                 }
                 // src 0 is the hook fallback: it has no device identity
                 if self.device.viewer == Viewer::Keyboard && (*src == 0 || self.srcs.contains(src)) {
-                    self.buf.push(Ev::Key { code, down: *down, ts: self.rel_ms(*ts) });
+                    if let Some(o) = self.keys.event(code, *down, *ts) {
+                        self.buf.push(Ev::Key { code, down: *down, ts: self.rel_ms(*ts), hold: o.hold_ms, gap: o.gap_ms, chatter: o.chatter, held: o.held, max: o.max_held });
+                    }
                 }
             }
             RawEvent::FocusLost { .. } | RawEvent::DevicesChanged | RawEvent::RawBlind => {}
@@ -129,6 +134,11 @@ impl Session {
             self.buf.push(Ev::Reserved { label: "win + l".into() });
         }
         Some(EndReason::FocusLost)
+    }
+
+    /// reset the per-session key stats (the "reset" button of the tested tracker)
+    pub fn reset_keys(&mut self) {
+        self.keys.reset();
     }
 
     pub fn heartbeat(&mut self, now: u64) {
@@ -177,6 +187,12 @@ impl Session {
     }
 }
 
+#[derive(serde::Deserialize, Clone, Debug)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum SessionCommand {
+    ResetKeys,
+}
+
 pub struct StartReq {
     pub device: DeviceInfo,
     pub settings: SessionSettings,
@@ -192,6 +208,7 @@ pub enum EngineMsg {
     End(EndReason),
     FocusLost,
     Heartbeat,
+    Command(SessionCommand),
     Shutdown,
 }
 
@@ -310,6 +327,13 @@ fn run(rx: Receiver<EngineMsg>, platform: Arc<dyn Platform>, nudge: Arc<Nudge>, 
                 let end = live.as_mut().and_then(|l| l.session.on_focus_lost(now));
                 if let Some(r) = end {
                     finish(&mut live, &platform, &active, r);
+                }
+            }
+            Ok(EngineMsg::Command(cmd)) => {
+                if let Some(l) = live.as_mut() {
+                    match cmd {
+                        SessionCommand::ResetKeys => l.session.reset_keys(),
+                    }
                 }
             }
             Ok(EngineMsg::Heartbeat) => {
@@ -529,6 +553,22 @@ mod tests {
     }
 
     #[test]
+    fn key_events_carry_hold_time_chatter_and_rollover() {
+        let mut s = kbd_session();
+        s.on_raw(&key(1, "KeyA", true, T0 + MS));
+        s.on_raw(&key(1, "KeyS", true, T0 + 2 * MS));
+        s.on_raw(&key(1, "KeyA", false, T0 + 80 * MS)); // held 79ms
+        s.on_raw(&key(1, "KeyA", true, T0 + 95 * MS)); // 15ms bounce
+        s.on_raw(&key(1, "KeyA", true, T0 + 120 * MS)); // os auto-repeat: dropped
+        let evs = s.take_frame().unwrap().events;
+        let keys: Vec<_> = evs.iter().filter_map(|e| if let Ev::Key { code, down, hold, chatter, held, max, .. } = e { Some((*code, *down, *hold, *chatter, *held, *max)) } else { None }).collect();
+        assert_eq!(keys.len(), 4, "auto-repeat must not produce an event");
+        assert_eq!(keys[1].5, 2, "max rollover");
+        assert!((keys[2].2.unwrap() - 79.0).abs() < 0.01);
+        assert!(keys[3].3, "15ms release->press is chatter");
+    }
+
+    #[test]
     fn frames_are_sequenced() {
         let mut s = kbd_session();
         s.on_raw(&key(1, "KeyA", true, T0));
@@ -616,7 +656,7 @@ mod engine_thread_tests {
             let (tx, rx) = mpsc::channel();
             let req = StartReq {
                 device: d,
-                settings: SessionSettings { esc_hold_ms: 400, combo_hold_ms: 600 }.sanitized(),
+                settings: SessionSettings { esc_hold_ms: 400, combo_hold_ms: 600, chatter_ms: 30.0 }.sanitized(),
                 window: None,
                 sink: Box::new(Collect { frames: self.frames.clone(), alive: self.alive.clone() }),
                 reply: tx,

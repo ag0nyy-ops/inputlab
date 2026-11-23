@@ -41,6 +41,7 @@ pub fn run() {
             commands::start_session,
             commands::end_session,
             commands::session_heartbeat,
+            commands::session_command,
             commands::key_labels,
         ])
         .on_window_event(|window, event| {

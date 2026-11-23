@@ -3,8 +3,10 @@
 import { useEffect, useRef } from 'react';
 import { onFrame } from '../lib/session';
 import type { SessionInfo } from '../lib/types';
+import { KeyboardView } from './KeyboardView';
 
 export function SessionBody({ info }: { info: SessionInfo }) {
+  if (info.device.viewer === 'keyboard') return <KeyboardView info={info} />;
   return <RawMonitor info={info} />;
 }
 
@@ -17,7 +19,6 @@ function RawMonitor({ info }: { info: SessionInfo }) {
     () =>
       onFrame((events) => {
         for (const e of events) {
-          if (e.t === 'key') lines.current.push(`${e.ts.toFixed(1).padStart(9)} ms  ${e.down ? 'down' : 'up  '}  ${e.code}`);
           if (e.t === 'reserved') lines.current.push(`          reserved by os: ${e.label}`);
         }
         lines.current = lines.current.slice(-40);
