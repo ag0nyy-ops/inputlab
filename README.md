@@ -38,7 +38,7 @@ first run: start it once with `--no-capture` (below) and look around. then try a
 
 | platform | status | what that means |
 | --- | --- | --- |
-| windows | primary | raw input (`WM_INPUT`, buffered drain), low-level hooks, `ClipCursor` and a `QueryPerformanceCounter` clock are implemented. the unit tests are set up to run on a windows runner in ci (the workflow has not run yet). the author has not yet run the lockdown paths on real hardware, so test with `--no-capture` first and report anything odd. |
+| windows | primary | raw input (`WM_INPUT`, buffered drain), low-level hooks, `ClipCursor` and a `QueryPerformanceCounter` clock are implemented. the unit tests run on a windows runner in ci and pass there, which also proves the raw input and hook code compiles on windows. the author has not yet run the lockdown paths on real hardware, so test with `--no-capture` first and report anything odd. |
 | linux | experimental | evdev readers with kernel timestamps and an exclusive-grab capture. needs read access to `/dev/input` (the `input` group). runs headless in ci-style containers; not yet tried on real keyboards and mice. |
 | macos | stub | devices are listed through the iokit hid manager. live keyboard/mouse input, polling and capture are not written yet. controllers, midi and generic hid use cross-platform libraries and may work. |
 

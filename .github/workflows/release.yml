@@ -70,6 +70,16 @@ jobs:
 
       - run: npm ci
 
+      - name: release notes from RELEASE_NOTES.md
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<NOTES_EOF'
+            cat RELEASE_NOTES.md
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: build installers and attach them to the draft release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -77,9 +87,7 @@ jobs:
         with:
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: inputlab ${{ inputs.tag || github.ref_name }}
-          releaseBody: |
-            unsigned builds. windows may show a smartscreen warning the first time: more info, then run anyway.
-            start with `--no-capture` if you want to look around before testing anything. see the readme for the exit rules.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
