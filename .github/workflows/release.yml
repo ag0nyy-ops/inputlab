@@ -36,8 +36,9 @@ jobs:
             args: --target aarch64-apple-darwin --bundles dmg
             rust_targets: aarch64-apple-darwin
             experimental: true
+          # cross-compiled from the arm runner: the intel macos-13 runners are retired
           - name: macos x64 (dmg, experimental)
-            os: macos-13
+            os: macos-latest
             args: --target x86_64-apple-darwin --bundles dmg
             rust_targets: x86_64-apple-darwin
             experimental: true
