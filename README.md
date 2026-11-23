@@ -147,8 +147,8 @@ mouse software (logitech g hub, razer synapse, steelseries gg and similar) can r
 
 these cannot be proven from a code review or a container. if you have the hardware, please check:
 
-- the windows lockdown end to end: esc-hold in a mouse session, the exit button and the combo in a keyboard session, alt+tab and the win key during a session, the window close button, and focus loss.
-- whether raw input still reports keys and clicks while the low-level hooks swallow them (the code detects the case where it does not and falls back to the hook as the key source, but it has not met a real machine).
+- the windows lockdown on more machines. checked on one windows 11 laptop (built-in keyboard): alt+tab, the win key and alt+f4 are swallowed in a keyboard test, and the exit combo still works. on that machine, windows called no low-level keyboard hook at all (in any process) while the focused app held a raw keyboard input registration, so a keyboard or controller test drops raw keyboard input and reads keys from the hook. the cost: during those tests keys from every keyboard show up, not only the one picked. `cargo run --example hookfocus raw` reproduces the windows behaviour.
+- esc-hold in a mouse session, the window close button and focus loss on other machines.
 - 4k and 8k mice, analog keyboards (the wooting report format is written from memory and marked unverified), specific controllers (dualsense, switch pro, xinput pads), battery and rumble, and the dualsense's gyro, adaptive trigger and audio features.
 
 ## adding things

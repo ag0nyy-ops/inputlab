@@ -1,4 +1,4 @@
-// inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
+// inputlab Â· Â© 2026 Jay Â· https://github.com/ag0nyy-ops/inputlab Â· source viewable, not reusable: see LICENSE
 //! windows: raw input (WM_INPUT) on a dedicated time-critical thread, low-level
 //! hooks for capture, ClipCursor for the mouse, QueryPerformanceCounter for time.
 //!
@@ -28,7 +28,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::Input::{
     GetRawInputData, GetRawInputDeviceInfoW, GetRawInputDeviceList, RegisterRawInputDevices, HRAWINPUT,
-    RAWINPUT, RAWINPUTDEVICE, RAWINPUTDEVICELIST, RAWINPUTHEADER, RIDEV_DEVNOTIFY, RIDEV_INPUTSINK, RIDI_DEVICENAME,
+    RAWINPUT, RAWINPUTDEVICE, RAWINPUTDEVICELIST, RAWINPUTHEADER, RIDEV_DEVNOTIFY, RIDEV_INPUTSINK, RIDEV_REMOVE, RIDI_DEVICENAME,
     RID_INPUT, RIM_TYPEKEYBOARD, RIM_TYPEMOUSE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -68,6 +68,8 @@ static WATCH_RAW: AtomicU64 = AtomicU64::new(0);
 static WATCH_CALLS: AtomicU64 = AtomicU64::new(0);
 static WATCH_AT: AtomicU64 = AtomicU64::new(0);
 static KB_ON: AtomicBool = AtomicBool::new(false);
+/// raw keyboard input is switched off while a test blocks shortcuts (see register_raw)
+static RAW_KB_OFF: AtomicBool = AtomicBool::new(false);
 /// keyboard hook installed but not swallowing: a second key source that keeps the exit rules alive
 static KB_MONITOR: AtomicBool = AtomicBool::new(false);
 static RAW_HWND: AtomicIsize = AtomicIsize::new(0);
@@ -121,6 +123,14 @@ unsafe fn release_all() {
     KB_ON.store(false, SeqCst);
     KB_MONITOR.store(false, SeqCst);
     MS_ON.store(false, SeqCst);
+    // raw keyboard input back on (see register_raw); the raw thread's timer re-asserts it too
+    if RAW_KB_OFF.swap(false, SeqCst) {
+        HOOK_SOURCE.store(false, SeqCst);
+        let rh = RAW_HWND.load(SeqCst);
+        if rh != 0 {
+            register_raw(HWND(rh as *mut c_void));
+        }
+    }
     let k = KB_HOOK.swap(0, SeqCst);
     if k != 0 {
         let _ = UnhookWindowsHookEx(HHOOK(k as *mut c_void));
@@ -254,12 +264,21 @@ unsafe fn on_wm_input(lparam: LPARAM) {
 /// windows keeps ONE raw input registration per process per device type, and the
 /// window toolkit registers its own when its event loop starts, which silently
 /// replaces ours. so we register again whenever it matters, and once a second.
+///
+/// while a test blocks keyboard shortcuts the keyboard is left out (and removed): on windows 11,
+/// while the foreground process holds a raw keyboard registration, windows calls no low-level
+/// keyboard hook at all, in any process. measured on a real machine: a bare hook got 0 calls for
+/// every key typed into a window registered for raw keyboard input (with or without
+/// RIDEV_INPUTSINK) and a call per key once the registration was gone. the hook then reads the keys.
 unsafe fn register_raw(hwnd: HWND) -> bool {
     let flags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
-    let rids = [
-        RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: flags, hwndTarget: hwnd },
-        RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x06, dwFlags: flags, hwndTarget: hwnd },
-    ];
+    let mouse = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: flags, hwndTarget: hwnd };
+    if RAW_KB_OFF.load(SeqCst) {
+        let remove = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x06, dwFlags: RIDEV_REMOVE, hwndTarget: HWND::default() };
+        let _ = RegisterRawInputDevices(&[remove], size_of::<RAWINPUTDEVICE>() as u32);
+        return RegisterRawInputDevices(&[mouse], size_of::<RAWINPUTDEVICE>() as u32).is_ok();
+    }
+    let rids = [mouse, RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x06, dwFlags: flags, hwndTarget: hwnd }];
     RegisterRawInputDevices(&rids, size_of::<RAWINPUTDEVICE>() as u32).is_ok()
 }
 
@@ -472,6 +491,13 @@ unsafe fn arm(spec: &CaptureSpec) -> CaptureReport {
         CaptureMode::Keyboard | CaptureMode::Other => match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard), Some(hinst), 0) {
             Ok(h) => {
                 KB_HOOK.store(h.0 as isize, SeqCst);
+                // a raw keyboard registration would stop windows calling the hook at all (see
+                // register_raw): drop it for the test and read the keys from the hook instead
+                HOOK_SOURCE.store(true, SeqCst);
+                RAW_KB_OFF.store(true, SeqCst);
+                if rh != 0 {
+                    register_raw(HWND(rh as *mut c_void));
+                }
                 KB_ON.store(true, SeqCst);
                 rep.keyboard_hooked = true;
             }
@@ -722,7 +748,7 @@ impl Platform for WindowsPlatform {
         let mut parts = vec![];
         if kb {
             parts.push(format!(
-                "keyboard hook {} (self-test {}) · hook saw {} keys · raw input saw {} · {} swallowed · {} from software · {} while unfocused · reinstalled {}x",
+                "keyboard hook {} (self-test {}) Â· hook saw {} keys Â· raw input saw {} Â· {} swallowed Â· {} from software Â· {} while unfocused Â· reinstalled {}x",
                 if KB_ON.load(Relaxed) { "swallowing" } else { "watching only" },
                 match HOOK_SELFTEST.load(Relaxed) { 1 => "passed", 2 => "FAILED", _ => "not run" },
                 HOOK_CALLS.load(Relaxed),
@@ -740,7 +766,7 @@ impl Platform for WindowsPlatform {
         if ms {
             parts.push("mouse hook installed".into());
         }
-        Some(parts.join(" · "))
+        Some(parts.join(" Â· "))
     }
 
     fn refresh_capture(&self) {
