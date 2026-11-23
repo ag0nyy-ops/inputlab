@@ -368,7 +368,7 @@ impl Session {
         let Some(p) = self.pad.as_mut() else { return };
         match msg {
             PadMsg::Status(s) if s.pad == p.pad => {
-                self.buf.push(Ev::PadInfo { force_feedback: s.force_feedback, power: s.power.clone(), battery: s.battery, poll_source: if p.hid_seen { "hid reports".into() } else { "events".into() }, bus: String::new(), hid_pad: String::new() });
+                self.buf.push(Ev::PadInfo { force_feedback: s.force_feedback, power: s.power.clone(), battery: s.battery, poll_source: if p.hid_seen { "hid reports".into() } else { "events".into() }, bus: p.hid_kind.map(|_| bus_name(p.bluetooth)).unwrap_or_default(), hid_pad: p.hid_kind.map(hid_pad_name).unwrap_or_default() });
             }
             PadMsg::Event(e) if e.pad == p.pad => {
                 p.events.push(e.ts);
@@ -861,8 +861,9 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                             if let Some(path) = info.device.hid_paths.first() {
                                 let t = tx.clone();
                                 // a bluetooth dualsense starts in a short report with no battery; asking for its
-                                // calibration feature report switches it to the full one
-                                let wake = info.device.bluetooth && matches!(info.device.vid.zip(info.device.pid).and_then(|(v, p)| crate::hid::pads::kind_for(v, p)), Some(crate::hid::pads::HidPad::DualSense));
+                                // calibration feature report switches it to the full one. over usb the same
+                                // request is what the pad's own driver does first, so it wakes a charging pad too
+                                let wake = matches!(info.device.vid.zip(info.device.pid).and_then(|(v, p)| crate::hid::pads::kind_for(v, p)), Some(crate::hid::pads::HidPad::DualSense));
                                 reader = HidReader::open_with(
                                     path,
                                     move |dev| {

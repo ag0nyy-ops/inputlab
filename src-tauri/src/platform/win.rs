@@ -60,6 +60,10 @@ static HOOK_INJECTED: AtomicU64 = AtomicU64::new(0);
 static HOOK_UNFOCUSED: AtomicU64 = AtomicU64::new(0);
 static HOOK_CALLS: AtomicU64 = AtomicU64::new(0);
 static HOOK_REINSTALLS: AtomicU32 = AtomicU32::new(0);
+/// the last keys the keyboard hook saw: vk | up << 8 | outcome << 9 (1 swallowed, 2 passed on, 3 unfocused)
+const KEYLOG_LEN: usize = 14;
+static KEYLOG: [AtomicU32; KEYLOG_LEN] = [const { AtomicU32::new(0) }; KEYLOG_LEN];
+static KEYLOG_N: AtomicU64 = AtomicU64::new(0);
 static WATCH_RAW: AtomicU64 = AtomicU64::new(0);
 static WATCH_CALLS: AtomicU64 = AtomicU64::new(0);
 static WATCH_AT: AtomicU64 = AtomicU64::new(0);
@@ -279,6 +283,43 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 
 // ---------------------------------------------------------------------- hooks
 
+fn log_key(vk: u32, up: bool, outcome: u32) {
+    let n = KEYLOG_N.fetch_add(1, Relaxed) as usize;
+    KEYLOG[n % KEYLOG_LEN].store((vk & 0xFF) | ((up as u32) << 8) | (outcome << 9) | (1 << 16), Relaxed);
+}
+
+/// a readable name for a virtual key, for the diagnostics line
+fn vk_name(vk: u32) -> String {
+    match vk {
+        0x08 => "backspace".into(),
+        0x09 => "tab".into(),
+        0x0D => "enter".into(),
+        0x10 | 0xA0 | 0xA1 => "shift".into(),
+        0x11 | 0xA2 | 0xA3 => "ctrl".into(),
+        0x12 | 0xA4 | 0xA5 => "alt".into(),
+        0x1B => "esc".into(),
+        0x20 => "space".into(),
+        0x2C => "prtsc".into(),
+        0x5B => "lwin".into(),
+        0x5C => "rwin".into(),
+        0x30..=0x39 | 0x41..=0x5A => (vk as u8 as char).to_ascii_lowercase().to_string(),
+        _ => format!("{vk:#04x}"),
+    }
+}
+
+/// "lwin+s tab-s": key, + down / - up, then s swallowed, p passed on, u passed because we were not foreground
+fn keylog_text() -> String {
+    let total = KEYLOG_N.load(Relaxed) as usize;
+    let count = total.min(KEYLOG_LEN);
+    let mut out = vec![];
+    for i in 0..count {
+        let v = KEYLOG[(total - count + i) % KEYLOG_LEN].load(Relaxed);
+        let o = match (v >> 9) & 3 { 1 => 's', 2 => 'p', _ => 'u' };
+        out.push(format!("{}{}{}", vk_name(v & 0xFF), if v & 0x100 != 0 { '-' } else { '+' }, o));
+    }
+    out.join(" ")
+}
+
 unsafe extern "system" fn ll_keyboard(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let swallow = KB_ON.load(Relaxed);
     if code >= 0 && (swallow || KB_MONITOR.load(Relaxed)) {
@@ -310,10 +351,15 @@ unsafe extern "system" fn ll_keyboard(code: i32, wparam: WPARAM, lparam: LPARAM)
             }
             if swallow {
                 HOOK_SWALLOWED.fetch_add(1, Relaxed);
+                if !selftest_key {
+                    log_key(info.vkCode, info.flags.0 & 0x80 != 0, 1);
+                }
                 return LRESULT(1);
             }
+            log_key(info.vkCode, info.flags.0 & 0x80 != 0, 2);
         } else if swallow && !selftest_key {
             HOOK_UNFOCUSED.fetch_add(1, Relaxed);
+            log_key(info.vkCode, info.flags.0 & 0x80 != 0, 3);
             emit_focus_lost();
         }
     }
@@ -377,6 +423,7 @@ unsafe fn arm(spec: &CaptureSpec) -> CaptureReport {
     HOOK_UNFOCUSED.store(0, SeqCst);
     HOOK_CALLS.store(0, SeqCst);
     HOOK_REINSTALLS.store(0, SeqCst);
+    KEYLOG_N.store(0, SeqCst);
     WATCH_RAW.store(0, SeqCst);
     WATCH_CALLS.store(0, SeqCst);
     WATCH_AT.store(0, SeqCst);
@@ -685,6 +732,10 @@ impl Platform for WindowsPlatform {
                 HOOK_UNFOCUSED.load(Relaxed),
                 HOOK_REINSTALLS.load(Relaxed)
             ));
+            let log = keylog_text();
+            if !log.is_empty() {
+                parts.push(format!("last keys the hook saw (s swallowed, p passed on, u not foreground): {log}"));
+            }
         }
         if ms {
             parts.push("mouse hook installed".into());
