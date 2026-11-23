@@ -123,6 +123,17 @@ function drawEl(ctx: CanvasRenderingContext2D, e: PadEl, st: PadDrawState): void
       ctx.lineWidth = 1.5; ctx.strokeStyle = pressed > 0.5 ? '#fff' : '#000'; ctx.stroke();
       break;
     }
+    case 'shape': {
+      const v = first(st, e.names);
+      const path = new Path2D(e.d);
+      ctx.fillStyle = shade(v);
+      ctx.fill(path);
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = FG;
+      ctx.stroke(path);
+      if (e.label) legend(ctx, e.label, e.lx ?? 200, e.ly ?? 80, v, e.label.length > 3 ? 10 : 11);
+      break;
+    }
     case 'path': {
       ctx.setLineDash(e.dash ? [4, 4] : []);
       ctx.strokeStyle = e.dash ? MUTED : FG;
