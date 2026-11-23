@@ -42,6 +42,8 @@ use super::*;
 use crate::keys;
 
 const WM_ARM: u32 = WM_APP + 1;
+/// ask the hook thread to install the keyboard hook again (windows can drop a hook silently)
+const WM_REHOOK: u32 = WM_APP + 2;
 
 static SINK: OnceLock<RawSink> = OnceLock::new();
 static THREAD_ID: AtomicU32 = AtomicU32::new(0);
@@ -57,6 +59,10 @@ static HOOK_SWALLOWED: AtomicU64 = AtomicU64::new(0);
 static HOOK_INJECTED: AtomicU64 = AtomicU64::new(0);
 static HOOK_UNFOCUSED: AtomicU64 = AtomicU64::new(0);
 static HOOK_CALLS: AtomicU64 = AtomicU64::new(0);
+static HOOK_REINSTALLS: AtomicU32 = AtomicU32::new(0);
+static WATCH_RAW: AtomicU64 = AtomicU64::new(0);
+static WATCH_CALLS: AtomicU64 = AtomicU64::new(0);
+static WATCH_AT: AtomicU64 = AtomicU64::new(0);
 static KB_ON: AtomicBool = AtomicBool::new(false);
 /// keyboard hook installed but not swallowing: a second key source that keeps the exit rules alive
 static KB_MONITOR: AtomicBool = AtomicBool::new(false);
@@ -370,6 +376,10 @@ unsafe fn arm(spec: &CaptureSpec) -> CaptureReport {
     HOOK_INJECTED.store(0, SeqCst);
     HOOK_UNFOCUSED.store(0, SeqCst);
     HOOK_CALLS.store(0, SeqCst);
+    HOOK_REINSTALLS.store(0, SeqCst);
+    WATCH_RAW.store(0, SeqCst);
+    WATCH_CALLS.store(0, SeqCst);
+    WATCH_AT.store(0, SeqCst);
     RAW_KEYS_SEEN.store(0, SeqCst);
     HOOK_SOURCE.store(false, SeqCst);
     RAW_MOUSE_SEEN.store(0, SeqCst);
@@ -473,6 +483,10 @@ unsafe fn hook_thread() {
         if r.0 <= 0 {
             break;
         }
+        if msg.hwnd.0.is_null() && msg.message == WM_REHOOK {
+            rehook_keyboard();
+            continue;
+        }
         if msg.hwnd.0.is_null() && msg.message == WM_ARM {
             let pending = PENDING.lock().ok().and_then(|mut p| p.take());
             if let Some((spec, tx)) = pending {
@@ -493,6 +507,22 @@ fn ensure_hook_thread() {
             hook_thread()
         });
     });
+}
+
+/// install the keyboard hook again, same mode as before. only ever runs on the hook thread.
+unsafe fn rehook_keyboard() {
+    if !(KB_ON.load(SeqCst) || KB_MONITOR.load(SeqCst)) {
+        return;
+    }
+    let hinst: HINSTANCE = GetModuleHandleW(None).map(|m| m.into()).unwrap_or_default();
+    let old = KB_HOOK.swap(0, SeqCst);
+    if old != 0 {
+        let _ = UnhookWindowsHookEx(HHOOK(old as *mut c_void));
+    }
+    if let Ok(h) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard), Some(hinst), 0) {
+        KB_HOOK.store(h.0 as isize, SeqCst);
+        HOOK_REINSTALLS.fetch_add(1, SeqCst);
+    }
 }
 
 /// inject a harmless key (F24) and check the keyboard hook is actually called for it.
@@ -645,13 +675,15 @@ impl Platform for WindowsPlatform {
         let mut parts = vec![];
         if kb {
             parts.push(format!(
-                "keyboard hook {} (self-test {}) · {} keys seen · {} swallowed · {} from software · {} while unfocused",
+                "keyboard hook {} (self-test {}) · hook saw {} keys · raw input saw {} · {} swallowed · {} from software · {} while unfocused · reinstalled {}x",
                 if KB_ON.load(Relaxed) { "swallowing" } else { "watching only" },
                 match HOOK_SELFTEST.load(Relaxed) { 1 => "passed", 2 => "FAILED", _ => "not run" },
                 HOOK_CALLS.load(Relaxed),
+                RAW_KEYS_SEEN.load(Relaxed),
                 HOOK_SWALLOWED.load(Relaxed),
                 HOOK_INJECTED.load(Relaxed),
-                HOOK_UNFOCUSED.load(Relaxed)
+                HOOK_UNFOCUSED.load(Relaxed),
+                HOOK_REINSTALLS.load(Relaxed)
             ));
         }
         if ms {
@@ -661,6 +693,21 @@ impl Platform for WindowsPlatform {
     }
 
     fn refresh_capture(&self) {
+        // the keyboard hook can go deaf (windows drops a hook that ever answers too slowly): raw
+        // input still sees the keys, the hook does not. install it again when that happens.
+        if KB_ON.load(Relaxed) {
+            let raw = RAW_KEYS_SEEN.load(Relaxed);
+            let calls = HOOK_CALLS.load(Relaxed);
+            let (wr, wc) = (WATCH_RAW.swap(raw, Relaxed), WATCH_CALLS.swap(calls, Relaxed));
+            let now = ts();
+            if raw >= wr + 2 && calls == wc && now.saturating_sub(WATCH_AT.load(Relaxed)) > 1_000_000_000 {
+                WATCH_AT.store(now, Relaxed);
+                let t = HOOK_THREAD_ID.load(Relaxed);
+                if t != 0 {
+                    let _ = unsafe { PostThreadMessageW(t, WM_REHOOK, WPARAM(0), LPARAM(0)) };
+                }
+            }
+        }
         let h = APP_HWND.load(Relaxed);
         if h != 0 && MS_ON.load(Relaxed) {
             unsafe {
