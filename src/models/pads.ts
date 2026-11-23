@@ -12,7 +12,7 @@ export interface PadModel {
   name: string;
   style: PadStyle;
   /** outline variant */
-  body: 'ps' | 'xbox' | 'x360' | 'switch' | 'generic';
+  body: 'ps' | 'ps5' | 'xbox' | 'x360' | 'switch' | 'generic';
   ids: [number, number][];
   match: RegExp;
   /** decoration only: these have no standard button mapping */
@@ -23,8 +23,8 @@ export interface PadModel {
 }
 
 export const PADS: PadModel[] = [
-  { id: 'dualsense-edge', name: 'DualSense Edge', style: 'playstation', body: 'ps', ids: [[0x054c, 0x0df2]], match: /dualsense\s*edge/i, touchpad: true, mute: true, paddles: true },
-  { id: 'dualsense', name: 'DualSense', style: 'playstation', body: 'ps', ids: [[0x054c, 0x0ce6]], match: /dualsense/i, touchpad: true, mute: true },
+  { id: 'dualsense-edge', name: 'DualSense Edge', style: 'playstation', body: 'ps5', ids: [[0x054c, 0x0df2]], match: /dualsense\s*edge/i, touchpad: true, mute: true, paddles: true },
+  { id: 'dualsense', name: 'DualSense', style: 'playstation', body: 'ps5', ids: [[0x054c, 0x0ce6]], match: /dualsense/i, touchpad: true, mute: true },
   { id: 'dualshock4', name: 'DualShock 4', style: 'playstation', body: 'ps', ids: [[0x054c, 0x05c4], [0x054c, 0x09cc]], match: /dualshock\s*4|ps4 controller|^wireless controller$/i, touchpad: true },
   { id: 'dualshock3', name: 'DualShock 3', style: 'playstation', body: 'ps', ids: [[0x054c, 0x0268]], match: /dualshock\s*3|playstation\(r\)3/i },
   { id: 'xbox-series', name: 'Xbox Series', style: 'xbox', body: 'xbox', ids: [[0x045e, 0x0b12], [0x045e, 0x0b13]], match: /xbox\s*(series|wireless controller)|series\s*[xs]/i, share: true },

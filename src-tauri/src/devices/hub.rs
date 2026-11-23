@@ -95,6 +95,8 @@ impl Hub {
                 usage_page: 0xFF00,
                 usage: 1,
                 interface: 0,
+                key_capacity: None,
+                bluetooth: false,
             });
         }
         ScanInputs {

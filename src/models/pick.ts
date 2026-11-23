@@ -49,7 +49,9 @@ export function usePick(d: Pick<DeviceInfo, 'id' | 'vid' | 'pid'>): string | nul
 
 /** what to call a device: the model you picked beats the product string ("usb receiver") */
 export function deviceTitle(d: Pick<DeviceInfo, 'id' | 'vid' | 'pid' | 'name' | 'viewer'>, picked: string | null): string {
+  // a mouse model renames mice, a controller layout renames controllers, nothing else:
+  // a receiver's keyboard interface shares the usb id but is not the mouse
   if (!picked) return d.name;
-  const m = findMouse(picked) ?? findPadModel(picked);
+  const m = d.viewer === 'mouse' ? findMouse(picked) : d.viewer === 'gamepad' ? findPadModel(picked) : null;
   return m ? m.name : d.name;
 }

@@ -48,10 +48,17 @@ describe('controller layouts', () => {
     expect(at('xbox', 'A').names).toEqual(['South']);
     expect(at('switch', 'A').names).toEqual(['East']);
   });
-  it('dualsense has a touchpad, a dualshock 3 does not', () => {
-    const has = (id: string) => padElements('playstation', PADS.find((p) => p.id === id)!).some((e) => e.k === 'decor' && e.label === 'touchpad');
-    expect(has('dualsense')).toBe(true);
-    expect(has('dualshock3')).toBe(false);
+  it('dualsense has a live touchpad and mute button, a dualshock 3 has neither', () => {
+    const has = (id: string, name: string) => padElements('playstation', PADS.find((p) => p.id === id)!).some((e) => 'names' in e && e.names.includes(name));
+    expect(has('dualsense', 'Touchpad')).toBe(true);
+    expect(has('dualsense', 'Mute')).toBe(true);
+    expect(has('dualshock3', 'Touchpad')).toBe(false);
+  });
+  it('the dualsense and the dualshock 4 are drawn differently', () => {
+    const a = matchPad({ name: 'x', vid: 0x054c, pid: 0x0ce6 });
+    const b = matchPad({ name: 'x', vid: 0x054c, pid: 0x09cc });
+    expect(a.body).toBe('ps5');
+    expect(b.body).toBe('ps');
   });
   it('every body outline exists', () => {
     for (const p of PADS) expect(BODIES[p.body]).toBeTruthy();

@@ -60,37 +60,26 @@ fn sticks(out: &mut Vec<Item>, d: &[u8]) {
     out.push(("RightStickY", -stick(d[3]), true));
 }
 
-/// `report` is exactly what hidapi read, report id first.
-pub fn decode(kind: HidPad, report: &[u8]) -> Option<Vec<Item>> {
+/// `report` is exactly what hidapi read, report id first. `bluetooth` matters because windows pads
+/// the short bluetooth "simple" report out to the full report size, so the length cannot tell the two
+/// layouts apart: the bus has to.
+pub fn decode(kind: HidPad, bluetooth: bool, report: &[u8]) -> Option<Vec<Item>> {
     let id = *report.first()?;
     let mut out = Vec::with_capacity(24);
     match kind {
-        HidPad::DualSense => match (id, report.len()) {
-            // usb (and bluetooth once the pad switched to its full report): sticks, triggers, then buttons
-            (0x01, n) if n >= 11 => {
-                let d = &report[1..];
-                sticks(&mut out, d);
-                out.push(("LeftTrigger2", d[4] as f32 / 255.0, false));
-                out.push(("RightTrigger2", d[5] as f32 / 255.0, false));
-                buttons(&mut out, d[7], d[8], d[9]);
-                out.push(("Mute", if d[9] & 0x04 != 0 { 1.0 } else { 0.0 }, false));
-            }
-            (0x31, n) if n >= 12 => {
-                let d = &report[2..];
-                sticks(&mut out, d);
-                out.push(("LeftTrigger2", d[4] as f32 / 255.0, false));
-                out.push(("RightTrigger2", d[5] as f32 / 255.0, false));
-                buttons(&mut out, d[7], d[8], d[9]);
-                out.push(("Mute", if d[9] & 0x04 != 0 { 1.0 } else { 0.0 }, false));
-            }
-            // bluetooth "simple" report, before the pad is switched to the full one
-            (0x01, n) if n >= 9 => {
+        HidPad::DualSense => match id {
+            // bluetooth before the pad switches to its full report: the short, dualshock-like layout
+            0x01 if bluetooth && report.len() >= 9 => {
                 let d = &report[1..];
                 sticks(&mut out, d);
                 out.push(("LeftTrigger2", d[7] as f32 / 255.0, false));
                 out.push(("RightTrigger2", d[8] as f32 / 255.0, false));
                 buttons(&mut out, d[4], d[5], d[6]);
             }
+            // usb: sticks, triggers, then buttons
+            0x01 if report.len() >= 11 => ds5_full(&mut out, &report[1..]),
+            // bluetooth full report
+            0x31 if report.len() >= 12 => ds5_full(&mut out, &report[2..]),
             _ => return None,
         },
         HidPad::DualShock4 => {
@@ -106,6 +95,77 @@ pub fn decode(kind: HidPad, report: &[u8]) -> Option<Vec<Item>> {
         }
     }
     Some(out)
+}
+
+fn ds5_full(out: &mut Vec<Item>, d: &[u8]) {
+    sticks(out, d);
+    out.push(("LeftTrigger2", d[4] as f32 / 255.0, false));
+    out.push(("RightTrigger2", d[5] as f32 / 255.0, false));
+    buttons(out, d[7], d[8], d[9]);
+    out.push(("Mute", if d[9] & 0x04 != 0 { 1.0 } else { 0.0 }, false));
+}
+
+/// ("wired" | "discharging" | "charging" | "charged", percent). None when the report does not carry it.
+pub fn battery(kind: HidPad, bluetooth: bool, report: &[u8]) -> Option<(&'static str, Option<u8>)> {
+    let id = *report.first()?;
+    match kind {
+        HidPad::DualSense => {
+            let status = match id {
+                0x01 if !bluetooth && report.len() > 53 => report[53],
+                0x31 if report.len() > 54 => report[54],
+                _ => return None,
+            };
+            let level = status & 0x0F;
+            let pct = (level as u32 * 10 + 5).min(100) as u8;
+            match (status >> 4) & 0x0F {
+                0 => Some(("discharging", Some(pct))),
+                1 => Some(("charging", Some(pct))),
+                2 => Some(("charged", Some(100))),
+                _ => None,
+            }
+        }
+        HidPad::DualShock4 => {
+            let status = match (id, report.len()) {
+                (0x01, n) if n > 30 => report[30],
+                (0x11, n) if n > 32 => report[32],
+                _ => return None,
+            };
+            let level = (status & 0x0F) as u32;
+            if status & 0x10 != 0 {
+                // cable plugged in: the scale is 0..10 and 11 means full
+                if level >= 11 { Some(("charged", Some(100))) } else { Some(("charging", Some((level * 10).min(100) as u8))) }
+            } else {
+                Some(("discharging", Some((level * 10 + 5).min(100) as u8)))
+            }
+        }
+    }
+}
+
+/// a usb output report that runs the two rumble motors. bluetooth output reports carry a crc and are
+/// not implemented, so there is no rumble over bluetooth.
+pub fn rumble_report(kind: HidPad, bluetooth: bool, strong: f32, weak: f32) -> Option<Vec<u8>> {
+    if bluetooth {
+        return None;
+    }
+    let (s, w) = ((strong.clamp(0.0, 1.0) * 255.0) as u8, (weak.clamp(0.0, 1.0) * 255.0) as u8);
+    Some(match kind {
+        HidPad::DualSense => {
+            let mut r = vec![0u8; 48];
+            r[0] = 0x02;
+            r[1] = 0x03; // compatible vibration + haptics select
+            r[3] = w; // right (small) motor
+            r[4] = s; // left (big) motor
+            r
+        }
+        HidPad::DualShock4 => {
+            let mut r = vec![0u8; 32];
+            r[0] = 0x05;
+            r[1] = 0x01; // rumble
+            r[4] = w;
+            r[5] = s;
+            r
+        }
+    })
 }
 
 #[cfg(test)]
@@ -134,7 +194,7 @@ mod tests {
 
     #[test]
     fn dualsense_idle_is_centred_and_released() {
-        let items = decode(HidPad::DualSense, &ds5(128, 128, 127, 127, 0, 0, 0x08, 0, 0)).unwrap();
+        let items = decode(HidPad::DualSense, false, &ds5(128, 128, 127, 127, 0, 0, 0x08, 0, 0)).unwrap();
         assert!(get(&items, "LeftStickX").abs() < 0.01);
         assert!(get(&items, "RightStickY").abs() < 0.01);
         for n in ["South", "East", "West", "North", "DPadUp", "DPadDown", "LeftTrigger", "Mode"] {
@@ -146,7 +206,7 @@ mod tests {
     #[test]
     fn dualsense_buttons_sticks_and_triggers() {
         // hat right (2) + cross (0x20); l1 + options; ps button; stick full right/up; l2 half, r2 full
-        let items = decode(HidPad::DualSense, &ds5(255, 0, 0, 255, 128, 255, 0x22, 0x21, 0x01)).unwrap();
+        let items = decode(HidPad::DualSense, false, &ds5(255, 0, 0, 255, 128, 255, 0x22, 0x21, 0x01)).unwrap();
         assert_eq!(get(&items, "South"), 1.0);
         assert_eq!(get(&items, "East"), 0.0);
         assert_eq!(get(&items, "DPadRight"), 1.0);
@@ -163,7 +223,7 @@ mod tests {
 
     #[test]
     fn dpad_diagonals_light_two_directions() {
-        let items = decode(HidPad::DualSense, &ds5(128, 128, 128, 128, 0, 0, 0x01, 0, 0)).unwrap(); // up-right
+        let items = decode(HidPad::DualSense, false, &ds5(128, 128, 128, 128, 0, 0, 0x01, 0, 0)).unwrap(); // up-right
         assert_eq!(get(&items, "DPadUp"), 1.0);
         assert_eq!(get(&items, "DPadRight"), 1.0);
         assert_eq!(get(&items, "DPadDown"), 0.0);
@@ -172,7 +232,7 @@ mod tests {
     #[test]
     fn face_buttons_map_to_the_logical_names() {
         for (mask, name) in [(0x10u8, "West"), (0x20, "South"), (0x40, "East"), (0x80, "North")] {
-            let items = decode(HidPad::DualSense, &ds5(128, 128, 128, 128, 0, 0, 0x08 | mask, 0, 0)).unwrap();
+            let items = decode(HidPad::DualSense, false, &ds5(128, 128, 128, 128, 0, 0, 0x08 | mask, 0, 0)).unwrap();
             assert_eq!(get(&items, name), 1.0, "{name}");
             let lit = items.iter().filter(|i| ["West", "South", "East", "North"].contains(&i.0) && i.1 > 0.0).count();
             assert_eq!(lit, 1);
@@ -184,12 +244,12 @@ mod tests {
         let mut bt = vec![0u8; 78];
         bt[0] = 0x31;
         bt[2..12].copy_from_slice(&[255, 128, 128, 128, 0, 0, 0, 0x28, 0, 0]); // cross + hat 0 (up)... 0x28 = cross|hat 8
-        let items = decode(HidPad::DualSense, &bt).unwrap();
+        let items = decode(HidPad::DualSense, false, &bt).unwrap();
         assert!(get(&items, "LeftStickX") > 0.99);
         assert_eq!(get(&items, "South"), 1.0);
         // simple: id, 4 sticks, b0, b1, b2, l2, r2
         let simple = [0x01u8, 128, 128, 128, 128, 0x48, 0x02, 0, 10, 20];
-        let items = decode(HidPad::DualSense, &simple).unwrap();
+        let items = decode(HidPad::DualSense, true, &simple).unwrap();
         assert_eq!(get(&items, "East"), 1.0);
         assert_eq!(get(&items, "RightTrigger"), 1.0);
         assert!((get(&items, "RightTrigger2") - 20.0 / 255.0).abs() < 0.001);
@@ -200,7 +260,7 @@ mod tests {
         let mut usb = vec![0u8; 64];
         usb[0] = 0x01;
         usb[1..10].copy_from_slice(&[0, 128, 255, 128, 0x88, 0x40, 0x01, 200, 0]); // square? 0x88: hat 8 + triangle; r3
-        let items = decode(HidPad::DualShock4, &usb).unwrap();
+        let items = decode(HidPad::DualShock4, false, &usb).unwrap();
         assert_eq!(get(&items, "North"), 1.0);
         assert_eq!(get(&items, "RightThumb"), 0.0);
         assert_eq!(get(&items, "LeftThumb"), 1.0);
@@ -210,15 +270,65 @@ mod tests {
         let mut bt = vec![0u8; 78];
         bt[0] = 0x11;
         bt[3..12].copy_from_slice(&[255, 128, 128, 128, 0x28, 0, 0, 0, 0]);
-        let items = decode(HidPad::DualShock4, &bt).unwrap();
+        let items = decode(HidPad::DualShock4, false, &bt).unwrap();
         assert_eq!(get(&items, "South"), 1.0);
     }
 
     #[test]
+    fn windows_pads_the_bluetooth_simple_report_and_the_bus_picks_the_layout() {
+        // a 10 byte simple report padded with zeros to 78 bytes, as windows hands it over
+        let mut padded = vec![0u8; 78];
+        padded[..10].copy_from_slice(&[0x01u8, 255, 128, 128, 128, 0x48, 0x02, 0, 10, 20]);
+        let bt = decode(HidPad::DualSense, true, &padded).unwrap();
+        assert!(get(&bt, "LeftStickX") > 0.99);
+        assert_eq!(get(&bt, "East"), 1.0);
+        assert_eq!(get(&bt, "RightTrigger"), 1.0);
+        // the same bytes read as a usb report would put the sticks and buttons in the wrong places
+        let wrong = decode(HidPad::DualSense, false, &padded).unwrap();
+        assert_ne!(get(&wrong, "East"), 1.0);
+    }
+
+    #[test]
+    fn dualsense_battery_charging_and_full() {
+        let mut r = vec![0u8; 64];
+        r[0] = 0x01;
+        r[53] = 0x06; // discharging, level 6
+        assert_eq!(battery(HidPad::DualSense, false, &r), Some(("discharging", Some(65))));
+        r[53] = 0x18; // charging, level 8
+        assert_eq!(battery(HidPad::DualSense, false, &r), Some(("charging", Some(85))));
+        r[53] = 0x2A; // full
+        assert_eq!(battery(HidPad::DualSense, false, &r), Some(("charged", Some(100))));
+        assert_eq!(battery(HidPad::DualSense, false, &r[..20]), None);
+    }
+
+    #[test]
+    fn dualshock4_battery_with_and_without_the_cable() {
+        let mut r = vec![0u8; 64];
+        r[0] = 0x01;
+        r[30] = 0x04;
+        assert_eq!(battery(HidPad::DualShock4, false, &r), Some(("discharging", Some(45))));
+        r[30] = 0x10 | 0x05;
+        assert_eq!(battery(HidPad::DualShock4, false, &r), Some(("charging", Some(50))));
+        r[30] = 0x10 | 0x0B;
+        assert_eq!(battery(HidPad::DualShock4, false, &r), Some(("charged", Some(100))));
+    }
+
+    #[test]
+    fn rumble_reports_put_the_motors_in_the_right_bytes_and_skip_bluetooth() {
+        let r = rumble_report(HidPad::DualSense, false, 1.0, 0.5).unwrap();
+        assert_eq!((r[0], r[1], r[3], r[4], r.len()), (0x02, 0x03, 127, 255, 48));
+        let r = rumble_report(HidPad::DualShock4, false, 0.0, 1.0).unwrap();
+        assert_eq!((r[0], r[4], r[5], r.len()), (0x05, 255, 0, 32));
+        assert!(rumble_report(HidPad::DualSense, true, 1.0, 1.0).is_none());
+        let off = rumble_report(HidPad::DualSense, false, 0.0, 0.0).unwrap();
+        assert_eq!((off[3], off[4]), (0, 0));
+    }
+
+    #[test]
     fn unknown_or_short_reports_decode_to_nothing() {
-        assert!(decode(HidPad::DualSense, &[]).is_none());
-        assert!(decode(HidPad::DualSense, &[0x01, 1, 2]).is_none());
-        assert!(decode(HidPad::DualSense, &[0x77; 64]).is_none());
-        assert!(decode(HidPad::DualShock4, &[0x01; 4]).is_none());
+        assert!(decode(HidPad::DualSense, false, &[]).is_none());
+        assert!(decode(HidPad::DualSense, false, &[0x01, 1, 2]).is_none());
+        assert!(decode(HidPad::DualSense, false, &[0x77; 64]).is_none());
+        assert!(decode(HidPad::DualShock4, false, &[0x01; 4]).is_none());
     }
 }

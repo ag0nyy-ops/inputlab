@@ -31,6 +31,9 @@ pub struct Field {
 pub struct Layout {
     pub fields: Vec<Field>,
     pub uses_report_ids: bool,
+    /// how many distinct keys the device can report on the keyboard page (modifier bits +
+    /// the key array or bitmap). a real keyboard is 100+; hotkey and backlight endpoints are tiny.
+    pub key_capacity: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -171,6 +174,17 @@ pub fn parse(desc: &[u8]) -> Layout {
                     };
                     let constant = u & 1 != 0;
                     let variable = u & 2 != 0;
+                    if g.page == 0x07 && !constant {
+                        if variable {
+                            if g.size == 1 {
+                                out.key_capacity += g.count as u32;
+                            }
+                        } else {
+                            // an array of key codes: capacity is the range of codes it can name
+                            let span = (g.max as i64 - g.min as i64 + 1).clamp(0, 4096) as u32;
+                            out.key_capacity += span;
+                        }
+                    }
                     for n in 0..g.count {
                         let off = offsets[slot].1;
                         offsets[slot].1 += g.size;
@@ -297,6 +311,24 @@ mod tests {
         0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x09, 0x01, 0xA1, 0x00, 0x05, 0x09, 0x19, 0x01, 0x29, 0x03, 0x15, 0x00, 0x25, 0x01, 0x95, 0x03, 0x75, 0x01, 0x81, 0x02, 0x95, 0x01,
         0x75, 0x05, 0x81, 0x01, 0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x09, 0x38, 0x15, 0x81, 0x25, 0x7F, 0x75, 0x08, 0x95, 0x03, 0x81, 0x06, 0xC0, 0xC0,
     ];
+
+    #[test]
+    fn a_boot_keyboard_declares_a_full_set_of_keys() {
+        // 8 modifier bits + an array of 6 key codes 0..101
+        let desc = [
+            0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x08, 0x81, 0x02, 0x95, 0x01, 0x75, 0x08, 0x81, 0x01, 0x95, 0x06,
+            0x75, 0x08, 0x15, 0x00, 0x25, 0x65, 0x05, 0x07, 0x19, 0x00, 0x29, 0x65, 0x81, 0x00, 0xC0,
+        ];
+        assert!(parse(&desc).key_capacity >= 100);
+    }
+
+    #[test]
+    fn a_hotkey_endpoint_declares_almost_no_keys() {
+        // four single-bit keys on the keyboard page
+        let desc = [0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x05, 0x07, 0x19, 0x3A, 0x29, 0x3D, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x04, 0x81, 0x02, 0xC0];
+        let c = parse(&desc).key_capacity;
+        assert!(c > 0 && c < 40, "{c}");
+    }
 
     #[test]
     fn parses_a_gamepad() {

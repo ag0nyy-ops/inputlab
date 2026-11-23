@@ -16,6 +16,7 @@ pub struct HidReport {
 
 pub struct HidReader {
     stop: Arc<AtomicBool>,
+    writes: std::sync::mpsc::Sender<Vec<u8>>,
     /// the device's report descriptor, when the os would give it to us
     pub descriptor: Vec<u8>,
 }
@@ -37,11 +38,16 @@ impl HidReader {
         };
         let stop = Arc::new(AtomicBool::new(false));
         let s2 = stop.clone();
+        let (writes, wrx) = std::sync::mpsc::channel::<Vec<u8>>();
         std::thread::Builder::new()
             .name("inputlab-hid-read".into())
             .spawn(move || {
                 let mut buf = vec![0u8; 512];
                 while !s2.load(Ordering::Relaxed) {
+                    // output reports (rumble) go out between reads
+                    while let Ok(w) = wrx.try_recv() {
+                        let _ = dev.write(&w);
+                    }
                     match dev.read_timeout(&mut buf, 100) {
                         Ok(0) => {}
                         Ok(n) => on_report(HidReport { ts: now_ns(), data: buf[..n].to_vec() }),
@@ -50,7 +56,14 @@ impl HidReader {
                 }
             })
             .map_err(|e| e.to_string())?;
-        Ok(Self { stop, descriptor })
+        Ok(Self { stop, writes, descriptor })
+    }
+}
+
+impl HidReader {
+    /// queue an output report. it goes out within one read interval (about 100 ms).
+    pub fn write(&self, data: Vec<u8>) {
+        let _ = self.writes.send(data);
     }
 }
 

@@ -72,4 +72,12 @@ describe('mouse models', () => {
     expect(m.confidence).toBe('ambiguous');
     expect(m.receiver).toBe(true);
   });
+
+  it('a picked mouse model renames mice but never the keyboard that shares the usb id', async () => {
+    const { deviceTitle } = await import('./pick');
+    const base = { id: 'x', vid: 0x046d, pid: 0xc53f, name: 'Logitech wireless mouse (usb receiver)' };
+    expect(deviceTitle({ ...base, viewer: 'mouse' }, 'logi-g305')).toBe('G305 lightspeed');
+    expect(deviceTitle({ ...base, viewer: 'keyboard', name: 'Logitech wireless keyboard (usb receiver)' }, 'logi-g305')).toBe('Logitech wireless keyboard (usb receiver)');
+    expect(deviceTitle({ ...base, viewer: 'mouse' }, null)).toBe(base.name);
+  });
 });

@@ -187,11 +187,13 @@ struct PadState {
     /// pads read straight from hid reports (playstation) have no gilrs events
     hid_kind: Option<crate::hid::pads::HidPad>,
     hid_last: std::collections::HashMap<&'static str, f32>,
+    bluetooth: bool,
+    hid_power: Option<(&'static str, Option<u8>)>,
 }
 
 impl PadState {
     fn new(pad: usize) -> Self {
-        Self { hid_kind: None, hid_last: Default::default(), pad, events: PollEstimator::new(), hid: PollEstimator::new(), hid_seen: false, left: StickTest::new(), right: StickTest::new(), rest: RestTest::new(), pending: vec![], last_snap: 0, last_reports: 0, idle_sent: true }
+        Self { hid_kind: None, hid_last: Default::default(), bluetooth: false, hid_power: None, pad, events: PollEstimator::new(), hid: PollEstimator::new(), hid_seen: false, left: StickTest::new(), right: StickTest::new(), rest: RestTest::new(), pending: vec![], last_snap: 0, last_reports: 0, idle_sent: true }
     }
     fn poll(&self) -> &PollEstimator {
         if self.hid_seen { &self.hid } else { &self.events }
@@ -220,7 +222,7 @@ pub struct Session {
 impl Session {
     pub fn new(device: DeviceInfo, settings: &SessionSettings, now: u64) -> Self {
         let mode = mode_for(device.viewer);
-        let (device_viewer, device_pad_id, device_vid, device_pid) = (device.viewer, device.pad_id, device.vid, device.pid);
+        let (device_viewer, device_pad_id, device_vid, device_pid, device_bt) = (device.viewer, device.pad_id, device.vid, device.pid, device.bluetooth);
         Self {
             srcs: device.srcs.iter().copied().collect(),
             exit: ExitTracker::new(ExitRule::for_mode(mode, settings)),
@@ -237,6 +239,7 @@ impl Session {
             midi: device_viewer == Viewer::Midi,
             pad: (device_viewer == Viewer::Gamepad).then(|| {
                 let mut p = PadState::new(device_pad_id.unwrap_or(usize::MAX));
+                p.bluetooth = device_bt;
                 if device_pad_id.is_none() {
                     if let (Some(v), Some(pid)) = (device_vid, device_pid) {
                         p.hid_kind = crate::hid::pads::kind_for(v, pid);
@@ -321,6 +324,13 @@ impl Session {
         }
     }
 
+    /// (on, off) output reports for a pad read over hid, when it can rumble
+    pub fn hid_rumble(&self, strong: f32, weak: f32) -> Option<(Vec<u8>, Vec<u8>)> {
+        let p = self.pad.as_ref()?;
+        let k = p.hid_kind?;
+        Some((crate::hid::pads::rumble_report(k, p.bluetooth, strong, weak)?, crate::hid::pads::rumble_report(k, p.bluetooth, 0.0, 0.0)?))
+    }
+
     pub fn pad_id(&self) -> Option<usize> {
         self.pad.as_ref().map(|p| p.pad)
     }
@@ -390,15 +400,23 @@ impl Session {
         if let Some(p) = self.pad.as_mut() {
             if !p.hid_seen {
                 p.hid_seen = true;
-                if p.hid_kind.is_some() {
-                    self.buf.push(Ev::PadInfo { force_feedback: false, power: "unknown".into(), battery: None, poll_source: "hid reports".into() });
+                if let Some(k) = p.hid_kind {
+                    let ff = crate::hid::pads::rumble_report(k, p.bluetooth, 0.0, 0.0).is_some();
+                    self.buf.push(Ev::PadInfo { force_feedback: ff, power: "unknown".into(), battery: None, poll_source: "hid reports".into() });
                 }
                 p.last_reports = 0; // switch the poll source cleanly
                 p.idle_sent = false;
             }
             p.hid.push(r.ts);
             if let Some(kind) = p.hid_kind {
-                if let Some(items) = crate::hid::pads::decode(kind, &r.data) {
+                if let Some(pw) = crate::hid::pads::battery(kind, p.bluetooth, &r.data) {
+                    if p.hid_power != Some(pw) {
+                        p.hid_power = Some(pw);
+                        let ff = crate::hid::pads::rumble_report(kind, p.bluetooth, 0.0, 0.0).is_some();
+                        self.buf.push(Ev::PadInfo { force_feedback: ff, power: pw.0.into(), battery: pw.1, poll_source: "hid reports".into() });
+                    }
+                }
+                if let Some(items) = crate::hid::pads::decode(kind, p.bluetooth, &r.data) {
                     for (name, v, axis) in items {
                         let changed = p.hid_last.get(name).is_none_or(|o| (o - v).abs() > 0.002);
                         if changed {
@@ -635,6 +653,8 @@ struct Live {
     last_focus_check: u64,
     last_refresh: u64,
     last_stats: String,
+    /// a rumble command to send once its time is up (stops the motors)
+    rumble_off: Option<(u64, Vec<u8>)>,
 }
 
 pub fn channel() -> (Sender<EngineMsg>, Receiver<EngineMsg>) {
@@ -666,6 +686,10 @@ fn finish(live: &mut Option<Live>, platform: &Arc<dyn Platform>, active: &Atomic
     let _ = pads.send(PadCmd::Watch(None));
     active.store(false, Ordering::SeqCst);
     if let Some(mut l) = live.take() {
+        if let (Some((_, off)), Some(rd)) = (l.rumble_off.take(), l._reader.as_ref()) {
+            rd.write(off);
+            std::thread::sleep(Duration::from_millis(150)); // let the reader loop send it before it stops
+        }
         l.session.push(Ev::Ended { reason });
         if let Some(f) = l.session.take_frame() {
             l.sink.send(f);
@@ -780,7 +804,7 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                                 reader = HidReader::open(path, move |r| { let _ = t.send(EngineMsg::Hid(r)); }).ok();
                             }
                         }
-                        live = Some(Live { _reader: reader, _midi: midi_conn, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now, last_stats: String::new() });
+                        live = Some(Live { _reader: reader, _midi: midi_conn, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now, last_stats: String::new(), rumble_off: None });
                         let _ = req.reply.send(Ok(info));
                     }
                     Err(e) => {
@@ -822,7 +846,13 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
             Ok(EngineMsg::Command(cmd)) => {
                 if let Some(l) = live.as_mut() {
                     if let SessionCommand::PadRumble { strong, weak, ms } = cmd {
-                        if let Some(pad) = l.session.pad_id() {
+                        if let Some((on, off)) = l.session.hid_rumble(strong, weak) {
+                            // a pad read over hid: write the output report ourselves
+                            if let Some(rd) = l._reader.as_ref() {
+                                rd.write(on);
+                                l.rumble_off = Some((now + ms.clamp(50, 5000) as u64 * MS, off));
+                            }
+                        } else if let Some(pad) = l.session.pad_id() {
                             let _ = pads.send(PadCmd::Rumble { pad, strong, weak, ms });
                         }
                     }
@@ -852,6 +882,13 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
 
         let mut end = None;
         if let Some(l) = live.as_mut() {
+            if let Some((at, _)) = l.rumble_off.as_ref() {
+                if now >= *at {
+                    if let (Some((_, off)), Some(rd)) = (l.rumble_off.take(), l._reader.as_ref()) {
+                        rd.write(off);
+                    }
+                }
+            }
             end = l.session.tick(now);
             if end.is_none() && now.saturating_sub(l.last_focus_check) >= FOCUS_CHECK_EVERY {
                 l.last_focus_check = now;

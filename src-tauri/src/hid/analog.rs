@@ -132,7 +132,7 @@ mod tests {
     use super::*;
 
     fn h(vid: u16, pid: u16, page: u16) -> HidInfo {
-        HidInfo { path: format!("p{page:x}"), vid, pid, product: None, manufacturer: None, usage_page: page, usage: 1, interface: 0 }
+        HidInfo { path: format!("p{page:x}"), vid, pid, usage_page: page, usage: 1, ..Default::default() }
     }
 
     #[test]

@@ -83,7 +83,7 @@ on windows: make a shortcut to inputlab, right-click it, properties, and add ` -
 
 ## playstation controllers and steam
 
-windows' game-controller layer does not expose dualsense and dualshock 4 pads, so inputlab reads their hid reports directly and decodes the sticks, triggers and buttons itself (usb and bluetooth). the report layouts are the publicly documented ones and are checked against hand-built reports, not yet against every real pad. rumble and battery are not available for pads read this way.
+windows' game-controller layer does not expose dualsense and dualshock 4 pads, so inputlab reads their hid reports directly and decodes the sticks, triggers and buttons itself (usb and bluetooth). the report layouts are the publicly documented ones and are checked against hand-built reports, not yet against every real pad. battery is read from the report, and rumble works over usb (bluetooth output reports carry a checksum that is not implemented, so no rumble over bluetooth). a pad over bluetooth uses a different, shorter report than over usb; inputlab picks the right layout from the connection.
 
 steam can interfere: its controller support grabs the ps button system-wide (it opens steam) and can present your pad as a virtual xbox controller. inputlab cannot block another app's hook, and a session ends when the window loses focus. close steam while you test.
 

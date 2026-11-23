@@ -67,6 +67,9 @@ pub struct DeviceInfo {
     pub analog_path: Option<String>,
     #[serde(skip)]
     pub pad_id: Option<usize>,
+    /// the device talks over bluetooth (changes how some pads' reports are laid out)
+    #[serde(skip)]
+    pub bluetooth: bool,
 }
 
 impl DeviceInfo {
@@ -90,6 +93,7 @@ impl DeviceInfo {
             hid_paths: vec![],
             analog_path: None,
             pad_id: None,
+            bluetooth: false,
         }
     }
 }
@@ -145,6 +149,34 @@ fn maker_for(hid: &[HidInfo], vid: Option<u16>, pid: Option<u16>) -> Option<Stri
         .find(|s| !s.trim().is_empty() && !s.to_lowercase().contains("(standard"))
 }
 
+fn vendor_name(vid: u16) -> Option<&'static str> {
+    Some(match vid {
+        0x046d => "Logitech",
+        0x045e => "Microsoft",
+        0x1532 => "Razer",
+        0x1038 => "SteelSeries",
+        0x054c => "Sony",
+        0x057e => "Nintendo",
+        0x1b1c => "Corsair",
+        0x046a => "Cherry",
+        0x17ef => "Lenovo",
+        0x413c => "Dell",
+        0x03f0 => "HP",
+        0x0b05 => "Asus",
+        0x258a | 0x320f => "Glorious",
+        0x3434 => "Keychron",
+        0x0951 => "HyperX",
+        0x1e7d => "Roccat",
+        _ => return None,
+    })
+}
+
+/// hid endpoints that firmware vendors expose next to a real keyboard (hotkeys, backlight, ec).
+fn is_plumbing_name(p: &str) -> bool {
+    let l = p.trim().to_lowercase();
+    l.starts_with("ite device(") || l.starts_with("itetech") || l.contains("backlight") || l.contains("hotkey")
+}
+
 /// names windows gives to nearly everything: they say nothing about what the thing is
 fn generic_product(p: &str) -> bool {
     let l = p.to_lowercase();
@@ -164,7 +196,7 @@ fn friendly_raw_name(kind: DeviceKind, vid: Option<u16>, pid: Option<u16>, produ
                     let l = x.to_lowercase();
                     l.contains("receiver") || l.contains("dongle")
                 });
-                let who = maker.unwrap_or_default();
+                let who = maker.or_else(|| vid.and_then(vendor_name).map(String::from)).unwrap_or_default();
                 let what = if wireless { format!("wireless {label} (usb receiver)") } else { format!("usb {label}") };
                 return format!("{who} {what}").trim().to_string();
             }
@@ -257,6 +289,11 @@ pub fn build_device_list(inp: &ScanInputs) -> Vec<DeviceInfo> {
             [DeviceKind::Keyboard, DeviceKind::Mouse].into_iter().filter(|k| members.iter().any(|m| m.kind == *k)).collect()
         };
 
+        // a keyboard-class interface that is really a hotkey/backlight endpoint, not a keyboard
+        let kb_caps: Vec<u32> = inp.hid.iter().filter(|h| Some(h.vid) == vid && Some(h.pid) == pid && h.usage_page == 1 && h.usage == 6).filter_map(|h| h.key_capacity).collect();
+        let not_a_keyboard = !kb_caps.is_empty() && kb_caps.iter().all(|c| *c < 40);
+        let plumbing_named = product.as_deref().is_some_and(is_plumbing_name);
+
         for kind in kinds {
             let (prefix, viewer) = match kind {
                 DeviceKind::Keyboard => ("kbd", Viewer::Keyboard),
@@ -282,6 +319,13 @@ pub fn build_device_list(inp: &ScanInputs) -> Vec<DeviceInfo> {
                         d.analog_path = Some(path);
                     }
                 }
+            }
+            // a wireless receiver always carries a keyboard interface (macro keys) next to the mouse,
+            // whether or not a keyboard is paired: hidden unless it sends keys is the honest default
+            if kind == DeviceKind::Keyboard && receiver && has_m {
+                d = hide(d, "the keyboard interface of a wireless receiver. it appears here whether or not a keyboard is paired; show hidden interfaces if you have a paired keyboard");
+            } else if kind == DeviceKind::Keyboard && (not_a_keyboard || plumbing_named) {
+                d = hide(d, "a hotkey, backlight or firmware endpoint, not a full keyboard");
             }
             out.push(d);
         }
@@ -347,6 +391,7 @@ pub fn build_device_list(inp: &ScanInputs) -> Vec<DeviceInfo> {
         d.vid = Some(vid);
         d.pid = Some(pid);
         d.interfaces = cols.len() as u32;
+        d.bluetooth = cols.iter().any(|c| c.bluetooth);
         // the primary collection first: that is the one the session reads
         d.hid_paths.push(primary.path.clone());
         d.hid_paths.extend(cols.iter().filter(|c| c.path != primary.path).map(|c| c.path.clone()));
@@ -412,7 +457,7 @@ mod tests {
     }
 
     fn hid(vid: u16, pid: u16, page: u16, usage: u16, iface: i32, name: &str) -> HidInfo {
-        HidInfo { path: format!("hid-{vid:x}-{pid:x}-{page:x}-{usage:x}-{iface}"), vid, pid, product: Some(name.to_string()), manufacturer: None, usage_page: page, usage, interface: iface }
+        HidInfo { path: format!("hid-{vid:x}-{pid:x}-{page:x}-{usage:x}-{iface}"), vid, pid, product: Some(name.to_string()), usage_page: page, usage, interface: iface, ..Default::default() }
     }
 
     fn inputs() -> ScanInputs {
@@ -507,7 +552,48 @@ mod tests {
         i.raw = vec![raw(1, DeviceKind::Keyboard, Some(0x046d), Some(0xc52b)), raw(2, DeviceKind::Mouse, Some(0x046d), Some(0xc52b))];
         i.hid = vec![hid(0x046d, 0xc52b, 1, 6, 0, "USB Receiver")];
         let list = build_device_list(&i);
-        assert_eq!(visible(&list).len(), 2);
+        // the receiver's keyboard interface is hidden by default; the mouse stays
+        assert_eq!(visible(&list).len(), 1);
+        assert_eq!(visible(&list)[0].kind, DeviceKind::Mouse);
+        assert_eq!(list.len(), 2, "the keyboard half is still there under hidden");
+    }
+
+    #[test]
+    fn hotkey_and_backlight_endpoints_are_not_keyboards() {
+        let mut i = inputs();
+        i.raw = vec![raw(1, DeviceKind::Keyboard, Some(0x048d), Some(0xc955)), raw(2, DeviceKind::Keyboard, Some(0x1234), Some(0x1))];
+        let mut a = hid(0x048d, 0xc955, 1, 6, 0, "ITE Device(8295)");
+        a.key_capacity = Some(12);
+        let mut b = hid(0x1234, 0x1, 1, 6, 0, "Real Keyboard");
+        b.key_capacity = Some(110);
+        i.hid = vec![a, b];
+        let list = build_device_list(&i);
+        assert_eq!(visible(&list).len(), 1);
+        assert_eq!(visible(&list)[0].name, "Real Keyboard");
+    }
+
+    #[test]
+    fn firmware_named_endpoints_are_hidden_even_without_a_descriptor() {
+        let mut i = inputs();
+        i.raw = vec![raw(1, DeviceKind::Keyboard, Some(0x048d), Some(0x8910))];
+        i.hid = vec![hid(0x048d, 0x8910, 1, 6, 0, "ITE Device(8910)")];
+        assert!(visible(&build_device_list(&i)).is_empty());
+    }
+
+    #[test]
+    fn a_keyboard_with_an_unreadable_descriptor_stays_visible() {
+        let mut i = inputs();
+        i.raw = vec![raw(1, DeviceKind::Keyboard, Some(0x1234), Some(0x2))];
+        i.hid = vec![hid(0x1234, 0x2, 1, 6, 0, "Some Keyboard")]; // key_capacity None
+        assert_eq!(visible(&build_device_list(&i)).len(), 1);
+    }
+
+    #[test]
+    fn a_generic_name_borrows_the_vendor_from_the_usb_id() {
+        let mut i = inputs();
+        i.raw = vec![raw(1, DeviceKind::Keyboard, Some(0x046d), Some(0xc232))];
+        i.hid = vec![hid(0x046d, 0xc232, 1, 6, 0, "USB Input Device")];
+        assert_eq!(build_device_list(&i)[0].name, "Logitech usb keyboard");
     }
 
     #[test]
