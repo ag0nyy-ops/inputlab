@@ -83,7 +83,7 @@ on windows: make a shortcut to inputlab, right-click it, properties, and add ` -
 
 ## playstation controllers and steam
 
-windows' game-controller layer does not expose dualsense and dualshock 4 pads, so inputlab reads their hid reports directly and decodes the sticks, triggers and buttons itself (usb and bluetooth). the report layouts are the publicly documented ones and are checked against hand-built reports, not yet against every real pad. battery is read from the report, and rumble works over usb (bluetooth output reports carry a checksum that is not implemented, so no rumble over bluetooth). a pad over bluetooth uses a different, shorter report than over usb; inputlab picks the right layout from the connection.
+windows' game-controller layer does not expose dualsense and dualshock 4 pads, so inputlab reads their hid reports directly and decodes the sticks, triggers and buttons itself (usb and bluetooth). the report layouts are the publicly documented ones and are checked against hand-built reports, not yet against every real pad. battery is read from the report, and rumble works over usb and bluetooth (bluetooth output reports carry a checksum, which is implemented for the dualsense). a dualsense over bluetooth starts in a short report with no battery; inputlab asks it to switch to the full report. the controller's raw tab shows a live hex view, so a button that lights the wrong part of the drawing can be traced to a byte.
 
 steam can interfere: its controller support grabs the ps button system-wide (it opens steam) and can present your pad as a virtual xbox controller. inputlab cannot block another app's hook, and a session ends when the window loses focus. close steam while you test.
 
@@ -123,6 +123,10 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
 the rust tests cover the exit rules (including the combo from a second keyboard and the controller-never-exits rule), the threaded engine against a fake platform that records every capture and release call, polling math from 125 hz to 8000 hz, the dpi and sensor math, the hid descriptor parser, and the device merge logic. the ui checks run in a browser against a development-only mock backend (`?empty=1`, `?state=offline`, `?many=1`, `?nocapture=1`, `?analog=1`), which never ships in release builds.
+
+### keyboard lock self-test
+
+the keyboard lock uses a low-level hook on its own thread. when a keyboard test starts, inputlab injects one harmless key (F24) and checks the hook was actually called for it. if windows is not calling the hook (security software or an anti-cheat driver can stop low-level hooks), the session screen says so in words instead of claiming shortcuts are blocked. the exit keys keep working either way, because they do not depend on the hook.
 
 ### buttons turned into macros
 

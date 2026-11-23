@@ -141,31 +141,65 @@ pub fn battery(kind: HidPad, bluetooth: bool, report: &[u8]) -> Option<(&'static
     }
 }
 
-/// a usb output report that runs the two rumble motors. bluetooth output reports carry a crc and are
-/// not implemented, so there is no rumble over bluetooth.
-pub fn rumble_report(kind: HidPad, bluetooth: bool, strong: f32, weak: f32) -> Option<Vec<u8>> {
-    if bluetooth {
-        return None;
+/// standard crc-32 (the one zlib uses)
+pub fn crc32(data: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &b in data {
+        crc ^= b as u32;
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+        }
     }
+    !crc
+}
+
+/// bluetooth output reports end with a crc-32 over a 0xA2 seed byte and everything before the checksum
+fn with_bt_crc(mut r: Vec<u8>) -> Vec<u8> {
+    let n = r.len() - 4;
+    let mut seeded = vec![0xA2u8];
+    seeded.extend_from_slice(&r[..n]);
+    let c = crc32(&seeded).to_le_bytes();
+    r[n..].copy_from_slice(&c);
+    r
+}
+
+static SEQ: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// an output report that runs the two rumble motors. the dualsense works over usb and bluetooth
+/// (bluetooth needs the crc); the dualshock 4 only over usb here.
+pub fn rumble_report(kind: HidPad, bluetooth: bool, strong: f32, weak: f32) -> Option<Vec<u8>> {
     let (s, w) = ((strong.clamp(0.0, 1.0) * 255.0) as u8, (weak.clamp(0.0, 1.0) * 255.0) as u8);
-    Some(match kind {
-        HidPad::DualSense => {
+    match (kind, bluetooth) {
+        (HidPad::DualSense, false) => {
             let mut r = vec![0u8; 48];
             r[0] = 0x02;
             r[1] = 0x03; // compatible vibration + haptics select
             r[3] = w; // right (small) motor
             r[4] = s; // left (big) motor
-            r
+            r[39] = 0x04; // compatible vibration v2, newer firmware
+            Some(r)
         }
-        HidPad::DualShock4 => {
+        (HidPad::DualSense, true) => {
+            let mut r = vec![0u8; 78];
+            r[0] = 0x31;
+            r[1] = (SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) & 0x0F) << 4;
+            r[2] = 0x10;
+            r[3] = 0x03;
+            r[5] = w;
+            r[6] = s;
+            r[41] = 0x04;
+            Some(with_bt_crc(r))
+        }
+        (HidPad::DualShock4, false) => {
             let mut r = vec![0u8; 32];
             r[0] = 0x05;
             r[1] = 0x01; // rumble
             r[4] = w;
             r[5] = s;
-            r
+            Some(r)
         }
-    })
+        (HidPad::DualShock4, true) => None,
+    }
 }
 
 #[cfg(test)]
@@ -319,9 +353,27 @@ mod tests {
         assert_eq!((r[0], r[1], r[3], r[4], r.len()), (0x02, 0x03, 127, 255, 48));
         let r = rumble_report(HidPad::DualShock4, false, 0.0, 1.0).unwrap();
         assert_eq!((r[0], r[4], r[5], r.len()), (0x05, 255, 0, 32));
-        assert!(rumble_report(HidPad::DualSense, true, 1.0, 1.0).is_none());
+        assert!(rumble_report(HidPad::DualShock4, true, 1.0, 1.0).is_none());
         let off = rumble_report(HidPad::DualSense, false, 0.0, 0.0).unwrap();
         assert_eq!((off[3], off[4]), (0, 0));
+    }
+
+    #[test]
+    fn crc32_matches_the_standard_check_value() {
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+        assert_eq!(crc32(b""), 0);
+    }
+
+    #[test]
+    fn dualsense_bluetooth_rumble_report_is_78_bytes_with_a_valid_crc() {
+        let r = rumble_report(HidPad::DualSense, true, 1.0, 0.5).unwrap();
+        assert_eq!((r[0], r[2], r[3], r[5], r[6], r.len()), (0x31, 0x10, 0x03, 127, 255, 78));
+        let mut seeded = vec![0xA2u8];
+        seeded.extend_from_slice(&r[..74]);
+        assert_eq!(u32::from_le_bytes([r[74], r[75], r[76], r[77]]), crc32(&seeded));
+        // the stop report is also valid
+        let off = rumble_report(HidPad::DualSense, true, 0.0, 0.0).unwrap();
+        assert_eq!((off[5], off[6]), (0, 0));
     }
 
     #[test]

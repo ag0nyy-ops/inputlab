@@ -3,6 +3,7 @@
 // they are pulled), live stick dots, and the tests: circularity, drift, polling,
 // rumble, plus a raw table of every control the pad reports.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { HexDump, type HexDumpHandle } from '../components/HexDump';
 import { Stamp } from '../components/Stamp';
 import { FG, LINE, LINE_STRONG, MONO, MUTED, fitCanvas } from '../lib/draw';
 import { addFrame } from '../lib/raf';
@@ -23,6 +24,8 @@ export function GamepadView({ info }: { info: SessionInfo }) {
   const [sticks, setSticks] = useState<{ left: StickSnap; right: StickSnap; rest: RestSnap } | null>(null);
   const [padInfo, setPadInfo] = useState<{ forceFeedback: boolean; power: string; battery: number | null; pollSource: string } | null>(null);
   const [raw, setRaw] = useState<PadItem[]>([]);
+  const [hasHid, setHasHid] = useState(false);
+  const dump = useRef<HexDumpHandle>(null);
   const [strong, setStrong] = useState(0.7);
   const [weak, setWeak] = useState(0.7);
 
@@ -52,6 +55,10 @@ export function GamepadView({ info }: { info: SessionInfo }) {
         } else if (e.t === 'poll') snaps.current.poll = e;
         else if (e.t === 'sticks') snaps.current.sticks = e;
         else if (e.t === 'padInfo') setPadInfo(e);
+        else if (e.t === 'hid') {
+          dump.current?.push(e.report, e.changed);
+          setHasHid(true);
+        }
       }
     });
     const t = window.setInterval(() => {
@@ -220,6 +227,13 @@ export function GamepadView({ info }: { info: SessionInfo }) {
 
         {tab === 'raw' && (
           <div className="gv__body">
+            {hasHid && (
+              <section>
+                <p className="label">raw input report · bytes that change flash</p>
+                <HexDump ref={dump} ariaLabel="raw controller report bytes" />
+                <p className="case__sub">if a button lights the wrong part of the drawing, press it alone and note which byte flashes. that is what to send along.</p>
+              </section>
+            )}
             <p className="label">every control the pad has reported · {raw.length}</p>
             {raw.length === 0 && <p className="case__sub">press something. controls appear here the first time they change, with the pad's own code next to gilrs's name for it.</p>}
             <table className="mv__table gv__raw">

@@ -189,11 +189,13 @@ struct PadState {
     hid_last: std::collections::HashMap<&'static str, f32>,
     bluetooth: bool,
     hid_power: Option<(&'static str, Option<u8>)>,
+    /// raw report bytes for the pad's hex view (only used for pads read over hid)
+    raw: HidState,
 }
 
 impl PadState {
     fn new(pad: usize) -> Self {
-        Self { hid_kind: None, hid_last: Default::default(), bluetooth: false, hid_power: None, pad, events: PollEstimator::new(), hid: PollEstimator::new(), hid_seen: false, left: StickTest::new(), right: StickTest::new(), rest: RestTest::new(), pending: vec![], last_snap: 0, last_reports: 0, idle_sent: true }
+        Self { hid_kind: None, hid_last: Default::default(), bluetooth: false, hid_power: None, raw: HidState::new(None), pad, events: PollEstimator::new(), hid: PollEstimator::new(), hid_seen: false, left: StickTest::new(), right: StickTest::new(), rest: RestTest::new(), pending: vec![], last_snap: 0, last_reports: 0, idle_sent: true }
     }
     fn poll(&self) -> &PollEstimator {
         if self.hid_seen { &self.hid } else { &self.events }
@@ -408,6 +410,9 @@ impl Session {
                 p.idle_sent = false;
             }
             p.hid.push(r.ts);
+            if p.hid_kind.is_some() {
+                p.raw.on_report(r);
+            }
             if let Some(kind) = p.hid_kind {
                 if let Some(pw) = crate::hid::pads::battery(kind, p.bluetooth, &r.data) {
                     if p.hid_power != Some(pw) {
@@ -564,7 +569,7 @@ impl Session {
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.buf.is_empty() || self.mouse.as_ref().is_some_and(|m| m.n > 0) || self.pad.as_ref().is_some_and(|p| !p.pending.is_empty()) || self.hid.as_ref().is_some_and(|h| h.fresh) || self.analog.as_ref().is_some_and(|a| a.raw.fresh)
+        !self.buf.is_empty() || self.mouse.as_ref().is_some_and(|m| m.n > 0) || self.pad.as_ref().is_some_and(|p| !p.pending.is_empty()) || self.pad.as_ref().is_some_and(|p| p.raw.fresh) || self.hid.as_ref().is_some_and(|h| h.fresh) || self.analog.as_ref().is_some_and(|a| a.raw.fresh)
     }
 
     pub fn take_frame(&mut self) -> Option<Frame> {
@@ -584,6 +589,9 @@ impl Session {
             a.raw.flush(&mut self.buf);
         }
         if let Some(p) = self.pad.as_mut() {
+            if p.hid_kind.is_some() {
+                p.raw.flush(&mut self.buf);
+            }
             if !p.pending.is_empty() {
                 self.buf.push(Ev::Pad { items: std::mem::take(&mut p.pending) });
             }
@@ -801,7 +809,23 @@ fn run(rx: Receiver<EngineMsg>, tx: Sender<EngineMsg>, platform: Arc<dyn Platfor
                             // the real polling rate comes from hid report timestamps, when the device lets us open it
                             if let Some(path) = info.device.hid_paths.first() {
                                 let t = tx.clone();
-                                reader = HidReader::open(path, move |r| { let _ = t.send(EngineMsg::Hid(r)); }).ok();
+                                // a bluetooth dualsense starts in a short report with no battery; asking for its
+                                // calibration feature report switches it to the full one
+                                let wake = info.device.bluetooth && matches!(info.device.vid.zip(info.device.pid).and_then(|(v, p)| crate::hid::pads::kind_for(v, p)), Some(crate::hid::pads::HidPad::DualSense));
+                                reader = HidReader::open_with(
+                                    path,
+                                    move |dev| {
+                                        if wake {
+                                            let mut b = [0u8; 41];
+                                            b[0] = 0x05;
+                                            let _ = dev.get_feature_report(&mut b);
+                                        }
+                                    },
+                                    move |r| {
+                                        let _ = t.send(EngineMsg::Hid(r));
+                                    },
+                                )
+                                .ok();
                             }
                         }
                         live = Some(Live { _reader: reader, _midi: midi_conn, session, sink: req.sink, capture_disabled: no_capture, last_flush: now, last_focus_check: now, last_refresh: now, last_stats: String::new(), rumble_off: None });

@@ -174,7 +174,17 @@ fn vendor_name(vid: u16) -> Option<&'static str> {
 /// hid endpoints that firmware vendors expose next to a real keyboard (hotkeys, backlight, ec).
 fn is_plumbing_name(p: &str) -> bool {
     let l = p.trim().to_lowercase();
-    l.starts_with("ite device(") || l.starts_with("itetech") || l.contains("backlight") || l.contains("hotkey")
+    l.contains("backlight") || l.contains("hotkey")
+}
+
+/// windows names an ITE keyboard controller "ITE Device(8295)". 8000-8999 are the laptop's own keyboard
+/// (the legacy ps/2 "built-in keyboard" next to them is only a placeholder).
+fn ite_laptop_keyboard(name: &str) -> bool {
+    let l = name.trim().to_lowercase();
+    l.strip_prefix("ite device(")
+        .and_then(|r| r.strip_suffix(')'))
+        .and_then(|n| n.parse::<u32>().ok())
+        .is_some_and(|n| (8000..9000).contains(&n))
 }
 
 /// names windows gives to nearly everything: they say nothing about what the thing is
@@ -291,8 +301,9 @@ pub fn build_device_list(inp: &ScanInputs) -> Vec<DeviceInfo> {
 
         // a keyboard-class interface that is really a hotkey/backlight endpoint, not a keyboard
         let kb_caps: Vec<u32> = inp.hid.iter().filter(|h| Some(h.vid) == vid && Some(h.pid) == pid && h.usage_page == 1 && h.usage == 6).filter_map(|h| h.key_capacity).collect();
-        let not_a_keyboard = !kb_caps.is_empty() && kb_caps.iter().all(|c| *c < 40);
-        let plumbing_named = product.as_deref().is_some_and(is_plumbing_name);
+        let laptop_kbd = product.as_deref().is_some_and(ite_laptop_keyboard);
+        let not_a_keyboard = !laptop_kbd && !kb_caps.is_empty() && kb_caps.iter().all(|c| *c < 40);
+        let plumbing_named = !laptop_kbd && product.as_deref().is_some_and(is_plumbing_name);
 
         for kind in kinds {
             let (prefix, viewer) = match kind {
@@ -397,6 +408,29 @@ pub fn build_device_list(inp: &ScanInputs) -> Vec<DeviceInfo> {
         d.hid_paths.extend(cols.iter().filter(|c| c.path != primary.path).map(|c| c.path.clone()));
         d.note = Some(format!("usage {:04x}:{:04x}", primary.usage_page, primary.usage));
         out.push(if usable { d } else { hide(d, why) });
+    }
+
+    // the laptop's own keyboard: its ite controller exposes several endpoints. one entry, and the legacy
+    // ps/2 keyboard next to it (a placeholder that never sends anything) is hidden.
+    let ite: Vec<usize> = out.iter().enumerate().filter(|(_, d)| d.kind == DeviceKind::Keyboard && ite_laptop_keyboard(&d.name)).map(|(i, _)| i).collect();
+    if !ite.is_empty() {
+        let mut merged = out[ite[0]].clone();
+        merged.id = "kbd-laptop".into();
+        merged.name = "laptop keyboard".into();
+        merged.usable = true;
+        merged.hidden_reason = None;
+        merged.srcs = ite.iter().flat_map(|&i| out[i].srcs.clone()).collect();
+        merged.interfaces = ite.iter().map(|&i| out[i].interfaces).sum();
+        merged.note = Some(format!("reported through its ite keyboard controller ({})", ite.iter().map(|&i| out[i].name.clone()).collect::<Vec<_>>().join(", ")));
+        for &i in ite.iter().rev() {
+            out.remove(i);
+        }
+        for d in out.iter_mut() {
+            if d.id == "kbd-sys" && d.usable {
+                *d = hide(d.clone(), "the legacy ps/2 keyboard: a placeholder. this laptop's keyboard is the ITE controller above");
+            }
+        }
+        out.push(merged);
     }
 
     // 4. midi
@@ -562,7 +596,7 @@ mod tests {
     fn hotkey_and_backlight_endpoints_are_not_keyboards() {
         let mut i = inputs();
         i.raw = vec![raw(1, DeviceKind::Keyboard, Some(0x048d), Some(0xc955)), raw(2, DeviceKind::Keyboard, Some(0x1234), Some(0x1))];
-        let mut a = hid(0x048d, 0xc955, 1, 6, 0, "ITE Device(8295)");
+        let mut a = hid(0x048d, 0xc955, 1, 6, 0, "Keyboard Backlight Controller");
         a.key_capacity = Some(12);
         let mut b = hid(0x1234, 0x1, 1, 6, 0, "Real Keyboard");
         b.key_capacity = Some(110);
@@ -573,11 +607,32 @@ mod tests {
     }
 
     #[test]
-    fn firmware_named_endpoints_are_hidden_even_without_a_descriptor() {
+    fn ite_8xxx_devices_are_the_laptop_keyboard_and_the_ps2_placeholder_is_hidden() {
         let mut i = inputs();
-        i.raw = vec![raw(1, DeviceKind::Keyboard, Some(0x048d), Some(0x8910))];
-        i.hid = vec![hid(0x048d, 0x8910, 1, 6, 0, "ITE Device(8910)")];
-        assert!(visible(&build_device_list(&i)).is_empty());
+        i.raw = vec![
+            raw(1, DeviceKind::Keyboard, Some(0x048d), Some(0xc955)),
+            raw(2, DeviceKind::Keyboard, Some(0x048d), Some(0x8910)),
+            RawDevice { src: 3, kind: DeviceKind::Keyboard, path: r"\\?\ACPI#PNP0303#4&1#{a}".into(), vid: None, pid: None },
+        ];
+        let mut a = hid(0x048d, 0xc955, 1, 6, 0, "ITE Device(8295)");
+        a.key_capacity = Some(12); // tiny: must not matter, this is the keyboard
+        i.hid = vec![a, hid(0x048d, 0x8910, 1, 6, 0, "ITE Device(8910)")];
+        let list = build_device_list(&i);
+        let vis = visible(&list);
+        assert_eq!(vis.len(), 1, "{:?}", list.iter().map(|d| (&d.name, d.usable)).collect::<Vec<_>>());
+        assert_eq!(vis[0].name, "laptop keyboard");
+        assert_eq!(vis[0].srcs, vec![1, 2], "events from both ite endpoints reach it");
+        assert!(list.iter().any(|d| d.id == "kbd-sys" && !d.usable));
+    }
+
+    #[test]
+    fn ite_devices_outside_8000_to_8999_are_not_assumed_to_be_the_keyboard() {
+        assert!(ite_laptop_keyboard("ITE Device(8000)"));
+        assert!(ite_laptop_keyboard("ITE Device(8999)"));
+        assert!(!ite_laptop_keyboard("ITE Device(7999)"));
+        assert!(!ite_laptop_keyboard("ITE Device(9000)"));
+        assert!(!ite_laptop_keyboard("ITE Device(abc)"));
+        assert!(!ite_laptop_keyboard("Some Keyboard"));
     }
 
     #[test]

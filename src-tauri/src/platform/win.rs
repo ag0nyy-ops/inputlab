@@ -23,7 +23,8 @@ use windows::Win32::System::Threading::{
     GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyboardLayout, GetKeyboardLayoutNameW, MapVirtualKeyExW, ToUnicodeEx, MAPVK_VSC_TO_VK_EX,
+    GetKeyboardLayout, GetKeyboardLayoutNameW, MapVirtualKeyExW, SendInput, ToUnicodeEx, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+    MAPVK_VSC_TO_VK_EX, VIRTUAL_KEY,
 };
 use windows::Win32::UI::Input::{
     GetRawInputData, GetRawInputDeviceInfoW, GetRawInputDeviceList, RegisterRawInputDevices, HRAWINPUT,
@@ -47,6 +48,11 @@ static THREAD_ID: AtomicU32 = AtomicU32::new(0);
 static KB_HOOK: AtomicIsize = AtomicIsize::new(0);
 static MS_HOOK: AtomicIsize = AtomicIsize::new(0);
 /// what the keyboard hook did, shown live on the session screen so a leak can be diagnosed
+/// the dedicated thread that owns the low-level hooks (its own message loop, normal priority)
+static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
+/// 0 = not run, 1 = the hook saw an injected test key, 2 = it did not
+static HOOK_SELFTEST: AtomicU32 = AtomicU32::new(0);
+static HOOK_THREAD: std::sync::Once = std::sync::Once::new();
 static HOOK_SWALLOWED: AtomicU64 = AtomicU64::new(0);
 static HOOK_INJECTED: AtomicU64 = AtomicU64::new(0);
 static HOOK_UNFOCUSED: AtomicU64 = AtomicU64::new(0);
@@ -442,6 +448,22 @@ unsafe fn raw_thread() {
         if r.0 <= 0 {
             break;
         }
+        let _ = TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+}
+
+/// owns the low-level hooks. a hook is only ever called while the thread that installed it is
+/// pumping messages, so it gets a thread of its own that does nothing else.
+unsafe fn hook_thread() {
+    let mut msg = MSG::default();
+    let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
+    HOOK_THREAD_ID.store(GetCurrentThreadId(), SeqCst);
+    loop {
+        let r = GetMessageW(&mut msg, None, 0, 0);
+        if r.0 <= 0 {
+            break;
+        }
         if msg.hwnd.0.is_null() && msg.message == WM_ARM {
             let pending = PENDING.lock().ok().and_then(|mut p| p.take());
             if let Some((spec, tx)) = pending {
@@ -452,6 +474,30 @@ unsafe fn raw_thread() {
         let _ = TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+}
+
+fn ensure_hook_thread() {
+    HOOK_THREAD.call_once(|| {
+        let _ = std::thread::Builder::new().name("inputlab-hooks".into()).spawn(|| unsafe { hook_thread() });
+    });
+}
+
+/// inject a harmless key (F24) and check the keyboard hook is actually called for it.
+unsafe fn keyboard_hook_selftest() -> bool {
+    let before = HOOK_CALLS.load(SeqCst);
+    let key = |up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(0x87), wScan: 0, dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) }, time: 0, dwExtraInfo: 0 } },
+    };
+    let inputs = [key(false), key(true)];
+    SendInput(&inputs, size_of::<INPUT>() as i32);
+    for _ in 0..40 {
+        if HOOK_CALLS.load(SeqCst) > before {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    false
 }
 
 // ------------------------------------------------------------------- platform
@@ -535,11 +581,12 @@ impl Platform for WindowsPlatform {
         if spec.disabled {
             return Ok(unsafe { arm(spec) });
         }
-        // hooks must live on the raw thread (it pumps messages), so hand the request over
+        // hooks live on their own thread (it pumps messages), so hand the request over
+        ensure_hook_thread();
         let mut waited = 0;
-        while THREAD_ID.load(SeqCst) == 0 {
+        while HOOK_THREAD_ID.load(SeqCst) == 0 {
             if waited > 100 {
-                return Err("the raw input thread is not running, capture is unavailable".into());
+                return Err("the hook thread is not running, capture is unavailable".into());
             }
             std::thread::sleep(Duration::from_millis(20));
             waited += 1;
@@ -548,8 +595,24 @@ impl Platform for WindowsPlatform {
         if let Ok(mut p) = PENDING.lock() {
             *p = Some((spec.clone(), tx));
         }
-        unsafe { PostThreadMessageW(THREAD_ID.load(SeqCst), WM_ARM, WPARAM(0), LPARAM(0)) }.map_err(|e| format!("could not reach the raw input thread: {e}"))?;
-        rx.recv_timeout(Duration::from_secs(2)).map_err(|_| "arming capture timed out".to_string())
+        unsafe { PostThreadMessageW(HOOK_THREAD_ID.load(SeqCst), WM_ARM, WPARAM(0), LPARAM(0)) }.map_err(|e| format!("could not reach the hook thread: {e}"))?;
+        let mut rep = rx.recv_timeout(Duration::from_secs(2)).map_err(|_| "arming capture timed out".to_string())?;
+
+        // does windows actually call the keyboard hook? say so, loudly, if it does not
+        if rep.keyboard_hooked {
+            let ok = unsafe { keyboard_hook_selftest() };
+            HOOK_SELFTEST.store(if ok { 1 } else { 2 }, SeqCst);
+            HOOK_CALLS.store(0, SeqCst);
+            HOOK_SWALLOWED.store(0, SeqCst);
+            HOOK_INJECTED.store(0, SeqCst);
+            HOOK_KEYS_SEEN.store(0, SeqCst);
+            HOOK_UNFOCUSED.store(0, SeqCst);
+            if !ok {
+                rep.keyboard_hooked = false;
+                rep.warnings.push("the keyboard hook is installed but windows is not calling it, so alt+tab, the windows key and other shortcuts are NOT blocked. the exit keys still work. something on this system (security software, a game anti-cheat, a driver) may be stopping low-level hooks.".into());
+            }
+        }
+        Ok(rep)
     }
 
     fn end_capture(&self) {
@@ -569,8 +632,9 @@ impl Platform for WindowsPlatform {
         let mut parts = vec![];
         if kb {
             parts.push(format!(
-                "keyboard hook {} · {} keys seen · {} swallowed · {} from software · {} while unfocused",
+                "keyboard hook {} (self-test {}) · {} keys seen · {} swallowed · {} from software · {} while unfocused",
                 if KB_ON.load(Relaxed) { "swallowing" } else { "watching only" },
+                match HOOK_SELFTEST.load(Relaxed) { 1 => "passed", 2 => "FAILED", _ => "not run" },
                 HOOK_CALLS.load(Relaxed),
                 HOOK_SWALLOWED.load(Relaxed),
                 HOOK_INJECTED.load(Relaxed),

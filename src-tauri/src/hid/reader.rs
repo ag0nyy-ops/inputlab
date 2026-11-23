@@ -25,12 +25,19 @@ impl HidReader {
     /// open `path` and call `on_report` for every input report until dropped.
     /// returns Err when the device cannot be opened (many system devices refuse).
     pub fn open(path: &str, on_report: impl Fn(HidReport) + Send + 'static) -> Result<Self, String> {
+        Self::open_with(path, |_| {}, on_report)
+    }
+
+    /// like `open`, but `init` runs once on the freshly opened device (a feature report that switches a
+    /// pad into its full report mode, for instance).
+    pub fn open_with(path: &str, init: impl FnOnce(&hidapi::HidDevice), on_report: impl Fn(HidReport) + Send + 'static) -> Result<Self, String> {
         let api = super::api().ok_or("hidapi is not available")?;
         let cpath = CString::new(path).map_err(|e| e.to_string())?;
         let dev = {
             let api = api.lock().map_err(|_| "hidapi lock poisoned".to_string())?;
             api.open_path(&cpath).map_err(|e| e.to_string())?
         };
+        init(&dev);
         let mut desc = vec![0u8; 4096];
         let descriptor = match dev.get_report_descriptor(&mut desc) {
             Ok(n) => desc[..n].to_vec(),
