@@ -152,7 +152,7 @@ src/
 
 ## releases
 
-pushing a tag like `v0.1.0` runs `.github/workflows/release.yml`, which builds the windows `.msi` and `.exe` (plus experimental macos and linux bundles) and attaches them to a draft release. ci (`ci.yml`) runs the frontend checks and the rust tests on linux and windows for every push and pull request.
+pushing a tag like `v0.1.0` (or running the workflow by hand with a version) runs `.github/workflows/release.yml`, which builds the windows `.msi` and `.exe` (plus experimental macos and linux bundles) and attaches them to a draft release. ci (`ci.yml`) runs the frontend checks and the rust tests on linux and windows for every push and pull request.
 
 ## privacy
 

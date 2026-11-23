@@ -7,6 +7,13 @@ name: release
 on:
   push:
     tags: ['v*']
+  # run it by hand with a version: it creates the draft release (and its tag) itself
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: release tag, like v0.1.0
+        required: true
+        default: v0.1.0
 
 permissions:
   contents: write
@@ -67,8 +74,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: inputlab ${{ github.ref_name }}
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: inputlab ${{ inputs.tag || github.ref_name }}
           releaseBody: |
             unsigned builds. windows may show a smartscreen warning the first time: more info, then run anyway.
             start with `--no-capture` if you want to look around before testing anything. see the readme for the exit rules.
