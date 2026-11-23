@@ -45,6 +45,8 @@
   .case__sub { font: 400 .82rem/1.4 var(--sans); color: var(--muted); margin-top: .2rem; }
   .case__stamp { position: absolute; right: 12px; top: 12px; }
   .case--gone .case__name { color: var(--muted); }
+  .case--hidden { border-style: dashed; }
+  .case--hidden .case__name { color: var(--muted); font-weight: 400; }
 
   /* numbered files */
   .files { counter-reset: file; }

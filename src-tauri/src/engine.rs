@@ -274,7 +274,7 @@ impl Session {
             }
             RawEvent::MouseButton { src, button, down, ts } => {
                 let rel = ns_to_ms(ts.saturating_sub(self.started));
-                if let Some(m) = self.mouse.as_mut().filter(|_| self.srcs.contains(src)) {
+                if let Some(m) = self.mouse.as_mut().filter(|_| *src == 0 || self.srcs.contains(src)) {
                     if let Some(o) = m.buttons.event(*button, *down, *ts) {
                         self.buf.push(Ev::Button { n: *button, down: *down, ts: rel, hold: o.hold_ms, gap: o.gap_ms, chatter: o.chatter });
                         if !*down {
@@ -284,11 +284,12 @@ impl Session {
                 }
             }
             RawEvent::Wheel { src, dx, dy, .. } => {
-                if self.mouse.is_some() && self.srcs.contains(src) {
+                if self.mouse.is_some() && (*src == 0 || self.srcs.contains(src)) {
                     self.buf.push(Ev::Wheel { dx: *dx, dy: *dy });
                 }
             }
-            RawEvent::FocusLost { .. } | RawEvent::DevicesChanged | RawEvent::RawBlind => {}
+            RawEvent::RawBlind => self.buf.push(Ev::Notice { text: "windows is not delivering raw input to this app, so keys and clicks are being read from the system hooks instead. polling rate and movement need raw input and will be missing.".into() }),
+            RawEvent::FocusLost { .. } | RawEvent::DevicesChanged => {}
         }
     }
 
@@ -1282,6 +1283,36 @@ mod tests {
         let mut k = kbd_session();
         k.on_midi(T0, &[0x90, 1, 1]);
         assert!(k.take_frame().is_none());
+    }
+
+    #[test]
+    fn esc_hold_still_works_when_keys_only_come_from_the_hook_fallback() {
+        // raw input is blind: the hook reports keys with no device identity (src 0)
+        let mut s = mouse_session();
+        s.on_raw(&RawEvent::RawBlind);
+        s.on_raw(&key(0, "Escape", true, T0));
+        assert_eq!(s.tick(T0 + 1000 * MS), Some(EndReason::EscHold));
+        let f = s.take_frame().unwrap();
+        assert!(f.events.iter().any(|e| matches!(e, Ev::Notice { text } if text.contains("raw input"))));
+    }
+
+    #[test]
+    fn the_combo_works_from_the_hook_fallback_too() {
+        let mut s = kbd_session();
+        for k in ["ControlLeft", "AltLeft", "ShiftLeft", "Backspace"] {
+            s.on_raw(&key(0, k, true, T0));
+        }
+        assert_eq!(s.tick(T0 + 1500 * MS), Some(EndReason::Combo));
+    }
+
+    #[test]
+    fn hook_sourced_clicks_reach_a_mouse_session() {
+        let mut s = mouse_session();
+        s.on_raw(&RawEvent::MouseButton { src: 0, button: 1, down: true, ts: T0 });
+        s.on_raw(&RawEvent::Wheel { src: 0, dx: 0, dy: 120, ts: T0 });
+        let f = s.take_frame().unwrap();
+        assert!(f.events.iter().any(|e| matches!(e, Ev::Button { n: 1, down: true, .. })));
+        assert!(f.events.iter().any(|e| matches!(e, Ev::Wheel { dy: 120, .. })));
     }
 
     #[test]

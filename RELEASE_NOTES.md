@@ -32,6 +32,7 @@ if the window loses focus, the ui stops answering, or the app crashes, everythin
 
 ## known limits, said plainly
 
+- if windows ever stops delivering raw input to the app, keys and clicks are read from the system hooks instead and a banner says so, so the exit keys keep working. movement and polling rate need raw input and will be missing in that case.
 - the windows lockdown (cursor clip, hooks, esc-hold, exit combo) compiles and its logic is unit tested, but it has not yet been run on a real machine by the author. use `--no-capture` first and report anything odd.
 - not checked on real hardware: 4k and 8k mice, analog keyboards (the wooting report format is unverified), specific controllers, rumble and battery.
 - ctrl+alt+del, win+l and other os-reserved combos cannot be captured. the keyboard view lists them as reserved.

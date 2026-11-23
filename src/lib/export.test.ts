@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { buildJson, buildText, type ReportInput } from './export';
 import type { DeviceInfo, SessionInfo } from './types';
 
-const dev = (o: Partial<DeviceInfo>): DeviceInfo => ({ id: 'x', name: 'sample device', kind: 'mouse', viewer: 'mouse', vid: 0x046d, pid: 0xc08b, connected: true, backend: 'rawinput', interfaces: 1, analogProfile: null, note: null, ...o });
+const dev = (o: Partial<DeviceInfo>): DeviceInfo => ({ id: 'x', name: 'sample device', kind: 'mouse', viewer: 'mouse', vid: 0x046d, pid: 0xc08b, connected: true, backend: 'rawinput', interfaces: 1, analogProfile: null, note: null, usable: true, hiddenReason: null, hiddenInterfaces: 0, ...o });
 const info = (d: DeviceInfo): SessionInfo => ({ device: d, mode: 'mouse', exit: { kind: 'esc', holdMs: 1000, button: false, combo: [] }, capture: { active: true, cursorClipped: true, keyboardHooked: false, mouseSwallowed: true, warnings: [] }, reserved: [], comboWarning: null, noCapture: false, hid: null, analog: null, midiError: null });
 const base = (d: DeviceInfo, results: ReportInput['results']): ReportInput => ({ app: { version: '0.1.0', os: 'windows', rawBackend: 'rawinput', caps: { rawInput: true, captureMouse: true, captureKeyboard: true, nativeKeyLabels: true, notes: [] }, noCapture: false, hidError: null }, info: info(d), results, startedAt: 0, endedAt: 95_000, reason: 'esc-hold' });
 

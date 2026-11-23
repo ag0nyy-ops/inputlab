@@ -107,6 +107,18 @@ export function DevicePanel() {
             <dd>{dev.analogProfile}</dd>
           </>
         )}
+        {dev.hiddenInterfaces > 0 && (
+          <>
+            <dt>other interfaces</dt>
+            <dd>{dev.hiddenInterfaces} folded in and hidden (config channels, system control)</dd>
+          </>
+        )}
+        {dev.hiddenReason && (
+          <>
+            <dt>why hidden</dt>
+            <dd>{dev.hiddenReason}</dd>
+          </>
+        )}
         {dev.note && (
           <>
             <dt>note</dt>

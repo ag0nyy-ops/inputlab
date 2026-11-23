@@ -42,6 +42,8 @@ pub fn run() {
     let engine = engine::spawn(rx, tx, platform.clone(), nudge, no_capture, pads.cmd.clone());
 
     let app = tauri::Builder::default()
+        // the window toolkit registers its own raw input for the whole process, which replaces ours
+        .device_event_filter(tauri::DeviceEventFilter::Always)
         .manage(AppState { hub, platform, engine, no_capture })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,

@@ -14,6 +14,10 @@ a native desktop input tester. it finds every keyboard, mouse, controller, midi 
 
 *real interface, generic sample data, rendered at 2x.*
 
+## one entry per real device
+
+windows and the hardware expose one physical device as many os interfaces: a gaming mouse can show up as a mouse, a keyboard (macros) and three vendor config channels, and windows adds its own remote-desktop and virtual inputs. inputlab folds those into one entry per physical device and hides the plumbing. a "show hidden interfaces" button at the bottom of the list brings it all back if you need it.
+
 ## what you get
 
 - **keyboards**: an on-screen board that lights on keydown and goes dark on keyup, driven by physical scancodes (not layout characters). full, tkl, 75%, 65%, 60%, ansi and iso. a tested-keys checklist, rollover count, per-key chatter detector, hold times, and a note of which combos the os keeps for itself. analog boards (wooting profile, experimental) light by how far each key is pressed.
@@ -38,7 +42,7 @@ first run: start it once with `--no-capture` (below) and look around. then try a
 
 | platform | status | what that means |
 | --- | --- | --- |
-| windows | primary | raw input (`WM_INPUT`, buffered drain), low-level hooks, `ClipCursor` and a `QueryPerformanceCounter` clock are implemented. the unit tests run on a windows runner in ci and pass there, which also proves the raw input and hook code compiles on windows. the author has not yet run the lockdown paths on real hardware, so test with `--no-capture` first and report anything odd. |
+| windows | primary | raw input (`WM_INPUT` on a dedicated time-critical thread that re-registers itself, because the window toolkit's own registration would otherwise replace it), low-level hooks, `ClipCursor` and a `QueryPerformanceCounter` clock are implemented. the unit tests run on a windows runner in ci and pass there, which also proves the raw input and hook code compiles on windows. the author has not yet run the lockdown paths on real hardware, so test with `--no-capture` first and report anything odd. |
 | linux | experimental | evdev readers with kernel timestamps and an exclusive-grab capture. needs read access to `/dev/input` (the `input` group). runs headless in ci-style containers; not yet tried on real keyboards and mice. |
 | macos | stub | devices are listed through the iokit hid manager. live keyboard/mouse input, polling and capture are not written yet. controllers, midi and generic hid use cross-platform libraries and may work. |
 

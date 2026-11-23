@@ -16,6 +16,10 @@ export interface DeviceInfo {
   interfaces: number;
   analogProfile: string | null;
   note: string | null;
+  /** false for interfaces nobody can hold (windows plumbing, config channels): hidden by default */
+  usable: boolean;
+  hiddenReason: string | null;
+  hiddenInterfaces: number;
 }
 
 export interface PlatformCaps {
@@ -101,6 +105,7 @@ export type Ev =
   | { t: 'pad'; items: PadItem[] }
   | { t: 'padInfo'; forceFeedback: boolean; power: string; battery: number | null; pollSource: string }
   | { t: 'sticks'; left: StickSnap; right: StickSnap; rest: RestSnap }
+  | { t: 'notice'; text: string }
   | { t: 'exit'; kind: ExitKind; progress: number }
   | { t: 'reserved'; label: string }
   | { t: 'ended'; reason: EndReason };

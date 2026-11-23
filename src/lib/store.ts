@@ -12,6 +12,8 @@ export interface AppState {
   devices: DeviceInfo[];
   devicesLoaded: boolean;
   selectedId: string | null;
+  /** also list interfaces that are not real devices (windows plumbing, config channels) */
+  showHidden: boolean;
   screen: Screen;
   session: SessionInfo | null;
   lastEnd: { reason: EndReason; at: number } | null;
@@ -24,6 +26,7 @@ let state: AppState = {
   devices: [],
   devicesLoaded: false,
   selectedId: null,
+  showHidden: false,
   screen: 'home',
   session: null,
   lastEnd: null,

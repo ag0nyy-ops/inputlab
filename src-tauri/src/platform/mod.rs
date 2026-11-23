@@ -151,16 +151,27 @@ pub fn emergency_release() {
     linux::emergency_release();
 }
 
-/// pull vid/pid out of a windows raw-input device path like
-/// `\\?\HID#VID_046D&PID_C33C&MI_00#8&2a#{884b96c3-...}`.
+/// pull vid/pid out of a windows raw-input device path. usb looks like
+/// `\\?\HID#VID_046D&PID_C33C&MI_00#...`, bluetooth like
+/// `\\?\HID#{00001124-...}_VID&0002046d_PID&b00d#...` (vendor source 0002 + the usb vid).
 pub fn parse_vid_pid(path: &str) -> (Option<u16>, Option<u16>) {
     let up = path.to_ascii_uppercase();
-    let grab = |tag: &str| -> Option<u16> {
-        let i = up.find(tag)? + tag.len();
-        let hex = up.get(i..i + 4)?;
-        u16::from_str_radix(hex, 16).ok()
-    };
-    (grab("VID_"), grab("PID_"))
+    let hex4 = |i: usize| up.get(i..i + 4).and_then(|h| u16::from_str_radix(h, 16).ok());
+    if let (Some(v), Some(p)) = (up.find("VID_"), up.find("PID_")) {
+        return (hex4(v + 4), hex4(p + 4));
+    }
+    // bluetooth: VID&00020000 style, eight digits, the low four are the vendor id
+    if let (Some(v), Some(p)) = (up.find("VID&"), up.find("PID&")) {
+        return (hex4(v + 8), hex4(p + 4));
+    }
+    (None, None)
+}
+
+/// input "devices" windows creates for its own reasons: remote desktop, hyper-v, the
+/// converted-portable and virtual hid layers. never a thing you can hold.
+pub fn is_virtual_path(path: &str) -> bool {
+    let u = path.to_ascii_uppercase();
+    ["RDP_", "ROOT#", "CONVERTEDDEVICE", "VMBUS", "VIRTUAL", "TERMINAL"].iter().any(|n| u.contains(n))
 }
 
 #[cfg(test)]
@@ -171,6 +182,20 @@ mod tests {
     fn parses_windows_paths() {
         let p = r"\\?\HID#VID_046D&PID_C33C&MI_00#8&2a1b&0&0000#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}";
         assert_eq!(parse_vid_pid(p), (Some(0x046d), Some(0xc33c)));
+    }
+
+    #[test]
+    fn parses_bluetooth_paths() {
+        let p = r"\\?\HID#{00001124-0000-1000-8000-00805f9b34fb}_VID&0002046d_PID&b00d#9&1c5e&0&0000#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}";
+        assert_eq!(parse_vid_pid(p), (Some(0x046d), Some(0xb00d)));
+    }
+
+    #[test]
+    fn recognises_windows_internal_devices() {
+        assert!(is_virtual_path(r"\\?\Root#RDP_KBD#0000#{a}"));
+        assert!(is_virtual_path(r"\\?\HID#ConvertedDevice&Col01#1&2&0&0000#{a}"));
+        assert!(!is_virtual_path(r"\\?\HID#VID_046D&PID_C33C&MI_00#8&2a#{a}"));
+        assert!(!is_virtual_path(r"\\?\ACPI#PNP0303#4&1#{a}"));
     }
 
     #[test]

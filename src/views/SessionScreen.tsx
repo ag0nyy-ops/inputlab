@@ -3,7 +3,8 @@
 //   mouse    -> no controls at all, just the esc-hold ring and hint
 //   keyboard -> big exit button + the persistent combo hint + ring
 //   other    -> big exit button only
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { onFrame } from '../lib/session';
 import { ExitRing } from '../components/ExitRing';
 import { Kbd } from '../components/Kbd';
 import { Stamp } from '../components/Stamp';
@@ -13,6 +14,8 @@ import { SessionBody } from './SessionBody';
 
 export function SessionScreen() {
   const s = useStore((st) => st.session);
+  const [notices, setNotices] = useState<string[]>([]);
+  useEffect(() => onFrame((evs) => { for (const e of evs) if (e.t === 'notice') setNotices((n) => (n.includes(e.text) ? n : [...n, e.text])); }), []);
   const gone = useStore((st) => st.session !== null && st.devices.some((d) => d.id === st.session!.device.id && !d.connected));
 
   useEffect(() => {
@@ -52,6 +55,13 @@ export function SessionScreen() {
           <div key={w} className="banner">
             <Stamp tone="wip" size="sm">note</Stamp>
             <p className="banner__p">{w}</p>
+            <span />
+          </div>
+        ))}
+        {notices.map((t) => (
+          <div key={t} className="banner banner--problem">
+            <Stamp tone="problem" size="sm">raw input</Stamp>
+            <p className="banner__p">{t}</p>
             <span />
           </div>
         ))}

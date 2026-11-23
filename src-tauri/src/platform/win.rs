@@ -26,15 +26,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyboardLayout, GetKeyboardLayoutNameW, MapVirtualKeyExW, ToUnicodeEx, MAPVK_VSC_TO_VK_EX,
 };
 use windows::Win32::UI::Input::{
-    GetRawInputBuffer, GetRawInputData, GetRawInputDeviceInfoW, GetRawInputDeviceList, RegisterRawInputDevices, HRAWINPUT,
+    GetRawInputData, GetRawInputDeviceInfoW, GetRawInputDeviceList, RegisterRawInputDevices, HRAWINPUT,
     RAWINPUT, RAWINPUTDEVICE, RAWINPUTDEVICELIST, RAWINPUTHEADER, RIDEV_DEVNOTIFY, RIDEV_INPUTSINK, RIDI_DEVICENAME,
     RID_INPUT, RIM_TYPEKEYBOARD, RIM_TYPEMOUSE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, ClipCursor, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetForegroundWindow,
-    GetMessageW, GetWindowThreadProcessId, PeekMessageW, PostThreadMessageW, RegisterClassW, SetWindowsHookExW,
+    GetMessageW, GetWindowThreadProcessId, PeekMessageW, PostThreadMessageW, RegisterClassW, SetTimer, SetWindowsHookExW,
     TranslateMessage, UnhookWindowsHookEx, HHOOK, HWND_MESSAGE, MSG, PM_NOREMOVE, WH_KEYBOARD_LL, WH_MOUSE_LL,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_INPUT, WM_INPUT_DEVICE_CHANGE, WM_MOUSEMOVE, WNDCLASSW, KBDLLHOOKSTRUCT,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_INPUT, WM_INPUT_DEVICE_CHANGE, WM_MOUSEMOVE, WM_TIMER, WNDCLASSW, KBDLLHOOKSTRUCT, MSLLHOOKSTRUCT,
 };
 
 use super::*;
@@ -47,6 +47,12 @@ static THREAD_ID: AtomicU32 = AtomicU32::new(0);
 static KB_HOOK: AtomicIsize = AtomicIsize::new(0);
 static MS_HOOK: AtomicIsize = AtomicIsize::new(0);
 static KB_ON: AtomicBool = AtomicBool::new(false);
+/// keyboard hook installed but not swallowing: a second key source that keeps the exit rules alive
+static KB_MONITOR: AtomicBool = AtomicBool::new(false);
+static RAW_HWND: AtomicIsize = AtomicIsize::new(0);
+static RAW_MOUSE_SEEN: AtomicU64 = AtomicU64::new(0);
+static HOOK_MOUSE_SEEN: AtomicU64 = AtomicU64::new(0);
+static MOUSE_HOOK_SOURCE: AtomicBool = AtomicBool::new(false);
 static MS_ON: AtomicBool = AtomicBool::new(false);
 static APP_HWND: AtomicIsize = AtomicIsize::new(0);
 static OUR_PID: AtomicU32 = AtomicU32::new(0);
@@ -92,6 +98,7 @@ pub fn emergency_release() {
 
 unsafe fn release_all() {
     KB_ON.store(false, SeqCst);
+    KB_MONITOR.store(false, SeqCst);
     MS_ON.store(false, SeqCst);
     let k = KB_HOOK.swap(0, SeqCst);
     if k != 0 {
@@ -134,6 +141,8 @@ struct MoveGroup {
 unsafe fn process_input(ri: &RAWINPUT, g: &mut MoveGroup) {
     let src = ri.header.hDevice.0 as usize as u64;
     if ri.header.dwType == RIM_TYPEMOUSE.0 {
+        RAW_MOUSE_SEEN.fetch_add(1, Relaxed);
+        MOUSE_HOOK_SOURCE.store(false, Relaxed);
         let m = ri.data.mouse;
         let absolute = m.usFlags.0 & 0x01 != 0;
         if m.lLastX != 0 || m.lLastY != 0 {
@@ -206,34 +215,25 @@ fn flush_moves(g: &mut MoveGroup) {
 unsafe fn on_wm_input(lparam: LPARAM) {
     let hdr = size_of::<RAWINPUTHEADER>() as u32;
     let mut g = MoveGroup::default();
-
     let mut buf = [0u64; 32];
     let mut size = (buf.len() * 8) as u32;
     let got = GetRawInputData(HRAWINPUT(lparam.0 as *mut c_void), RID_INPUT, Some(buf.as_mut_ptr() as *mut c_void), &mut size, hdr);
     if got != u32::MAX {
         process_input(&*(buf.as_ptr() as *const RAWINPUT), &mut g);
     }
-
-    // drain whatever queued up behind this message (8khz mice outrun the message pump)
-    let mut big = [0u64; 1024];
-    for _ in 0..8 {
-        let mut sz = (big.len() * 8) as u32;
-        let n = GetRawInputBuffer(Some(big.as_mut_ptr() as *mut RAWINPUT), &mut sz, hdr);
-        if n == 0 || n == u32::MAX {
-            break;
-        }
-        let mut p = big.as_ptr() as *const u8;
-        for _ in 0..n {
-            let ri = &*(p as *const RAWINPUT);
-            process_input(ri, &mut g);
-            let step = (ri.header.dwSize as usize + 7) & !7;
-            if step == 0 {
-                break;
-            }
-            p = p.add(step);
-        }
-    }
     flush_moves(&mut g);
+}
+
+/// windows keeps ONE raw input registration per process per device type, and the
+/// window toolkit registers its own when its event loop starts, which silently
+/// replaces ours. so we register again whenever it matters, and once a second.
+unsafe fn register_raw(hwnd: HWND) -> bool {
+    let flags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
+    let rids = [
+        RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: flags, hwndTarget: hwnd },
+        RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x06, dwFlags: flags, hwndTarget: hwnd },
+    ];
+    RegisterRawInputDevices(&rids, size_of::<RAWINPUTDEVICE>() as u32).is_ok()
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -241,6 +241,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_INPUT => {
             on_wm_input(lparam);
             DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_TIMER => {
+            register_raw(hwnd);
+            LRESULT(0)
         }
         WM_INPUT_DEVICE_CHANGE => {
             emit(RawEvent::DevicesChanged);
@@ -253,15 +257,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 // ---------------------------------------------------------------------- hooks
 
 unsafe extern "system" fn ll_keyboard(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code >= 0 && KB_ON.load(Relaxed) {
+    let swallow = KB_ON.load(Relaxed);
+    if code >= 0 && (swallow || KB_MONITOR.load(Relaxed)) {
         let info = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
         let injected = info.flags.0 & 0x10 != 0;
         if !injected {
             if app_foreground() {
                 let seen = HOOK_KEYS_SEEN.fetch_add(1, Relaxed) + 1;
-                // raw input should have reported these keys too. if it saw none, it is blind
-                // (the hook may hide keys from it): report keys from the hook instead.
-                if RAW_KEYS_SEEN.load(Relaxed) == 0 && seen >= 6 && !HOOK_SOURCE.swap(true, Relaxed) {
+                // raw input should have reported these keys too. if it saw none, it is blind:
+                // report keys from the hook instead, so the exit rules can never go deaf.
+                if RAW_KEYS_SEEN.load(Relaxed) == 0 && seen >= 4 && !HOOK_SOURCE.swap(true, Relaxed) {
                     emit(RawEvent::RawBlind);
                 }
                 if HOOK_SOURCE.load(Relaxed) {
@@ -273,9 +278,12 @@ unsafe extern "system" fn ll_keyboard(code: i32, wparam: WPARAM, lparam: LPARAM)
                         emit(RawEvent::Key { src: 0, code: c, down: !up, ts: ts() });
                     }
                 }
-                return LRESULT(1);
+                if swallow {
+                    return LRESULT(1);
+                }
+            } else if swallow {
+                notify_focus_lost();
             }
-            notify_focus_lost();
         }
     }
     CallNextHookEx(None, code, wparam, lparam)
@@ -285,6 +293,31 @@ unsafe extern "system" fn ll_mouse(code: i32, wparam: WPARAM, lparam: LPARAM) ->
     // moves pass untouched (the cursor is already clipped); everything else is swallowed
     if code >= 0 && MS_ON.load(Relaxed) && wparam.0 as u32 != WM_MOUSEMOVE {
         if app_foreground() {
+            let m = wparam.0 as u32;
+            let seen = HOOK_MOUSE_SEEN.fetch_add(1, Relaxed) + 1;
+            if RAW_MOUSE_SEEN.load(Relaxed) == 0 && seen >= 3 {
+                MOUSE_HOOK_SOURCE.store(true, Relaxed);
+            }
+            if MOUSE_HOOK_SOURCE.load(Relaxed) {
+                let info = &*(lparam.0 as *const MSLLHOOKSTRUCT);
+                let t = ts();
+                let delta = (info.mouseData >> 16) as i16 as i32;
+                match m {
+                    0x201 => emit(RawEvent::MouseButton { src: 0, button: 1, down: true, ts: t }),
+                    0x202 => emit(RawEvent::MouseButton { src: 0, button: 1, down: false, ts: t }),
+                    0x204 => emit(RawEvent::MouseButton { src: 0, button: 2, down: true, ts: t }),
+                    0x205 => emit(RawEvent::MouseButton { src: 0, button: 2, down: false, ts: t }),
+                    0x207 => emit(RawEvent::MouseButton { src: 0, button: 3, down: true, ts: t }),
+                    0x208 => emit(RawEvent::MouseButton { src: 0, button: 3, down: false, ts: t }),
+                    0x20B | 0x20C => {
+                        let n = if (info.mouseData >> 16) as u16 == 1 { 4 } else { 5 };
+                        emit(RawEvent::MouseButton { src: 0, button: n, down: m == 0x20B, ts: t });
+                    }
+                    0x20A => emit(RawEvent::Wheel { src: 0, dx: 0, dy: delta, ts: t }),
+                    0x20E => emit(RawEvent::Wheel { src: 0, dx: delta, dy: 0, ts: t }),
+                    _ => {}
+                }
+            }
             return LRESULT(1);
         }
         notify_focus_lost();
@@ -310,8 +343,15 @@ unsafe fn arm(spec: &CaptureSpec) -> CaptureReport {
     HOOK_KEYS_SEEN.store(0, SeqCst);
     RAW_KEYS_SEEN.store(0, SeqCst);
     HOOK_SOURCE.store(false, SeqCst);
+    RAW_MOUSE_SEEN.store(0, SeqCst);
+    HOOK_MOUSE_SEEN.store(0, SeqCst);
+    MOUSE_HOOK_SOURCE.store(false, SeqCst);
     FOCUS_SENT.store(false, SeqCst);
     APP_HWND.store(spec.window.unwrap_or(0), SeqCst);
+    let rh = RAW_HWND.load(SeqCst);
+    if rh != 0 {
+        register_raw(HWND(rh as *mut c_void));
+    }
 
     let mut rep = CaptureReport::default();
     if spec.disabled {
@@ -335,6 +375,12 @@ unsafe fn arm(spec: &CaptureSpec) -> CaptureReport {
                     rep.mouse_swallowed = true;
                 }
                 Err(e) => rep.warnings.push(format!("mouse hook failed ({e}): clicks can reach other apps.")),
+            }
+            // a mouse session has no keyboard lockdown, but esc-hold must work even if raw input
+            // goes quiet: a pass-through keyboard hook keeps a second key source ready
+            if let Ok(h) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard), Some(hinst), 0) {
+                KB_HOOK.store(h.0 as isize, SeqCst);
+                KB_MONITOR.store(true, SeqCst);
             }
         }
         CaptureMode::Keyboard | CaptureMode::Other => match SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard), Some(hinst), 0) {
@@ -365,15 +411,12 @@ unsafe fn raw_thread() {
             return;
         }
     };
-    let flags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
-    let rids = [
-        RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: flags, hwndTarget: hwnd },
-        RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x06, dwFlags: flags, hwndTarget: hwnd },
-    ];
-    if let Err(e) = RegisterRawInputDevices(&rids, size_of::<RAWINPUTDEVICE>() as u32) {
-        eprintln!("[inputlab] RegisterRawInputDevices failed: {e}");
-        return;
+    RAW_HWND.store(hwnd.0 as isize, SeqCst);
+    if !register_raw(hwnd) {
+        eprintln!("[inputlab] RegisterRawInputDevices failed, retrying every second");
     }
+    // re-assert once a second: the window toolkit's own registration replaces ours
+    SetTimer(Some(hwnd), 1, 1000, None);
 
     // make sure the thread has a message queue before anyone posts to it
     let mut msg = MSG::default();

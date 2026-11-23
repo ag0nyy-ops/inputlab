@@ -8,6 +8,9 @@ import type { Bridge } from './bridge';
 const q = new URLSearchParams(location.search);
 
 const dev = (p: Partial<DeviceInfo> & Pick<DeviceInfo, 'id' | 'name' | 'kind'>): DeviceInfo => ({
+  usable: true,
+  hiddenReason: null,
+  hiddenInterfaces: 0,
   viewer: p.kind,
   vid: null,
   pid: null,
@@ -29,6 +32,11 @@ function devices(): DeviceInfo[] {
     dev({ id: 'midi-5', name: 'sample midi keys', kind: 'midi', backend: 'midir' }),
     dev({ id: 'kbd-0006', name: 'sample analog keyboard', kind: 'keyboard', vid: 0x1234, pid: 0x0006, analogProfile: 'wooting', connected: !!q.get('analog') }),
   ];
+  if (q.get('hidden')) {
+    list.push(dev({ id: 'hid-v1', name: 'virtual input device', kind: 'keyboard', usable: false, hiddenReason: 'a virtual input device windows creates (remote desktop, hyper-v, converted hid)', backend: 'rawinput' }));
+    list.push(dev({ id: 'hid-v2', name: 'hid device 1532:00aa', kind: 'hid', backend: 'hidapi', usable: false, hiddenReason: 'only vendor-defined or system-control interfaces: a configuration channel, not an input' }));
+    list[1] = { ...list[1]!, hiddenInterfaces: 4, note: 'also exposes a keyboard interface (macro keys or a pointer); it is folded in here' };
+  }
   if (q.get('many')) {
     for (let i = 0; i < 14; i++) list.push(dev({ id: `hid-m${i}`, name: `sample hid device with a long name number ${i}`, kind: 'hid', backend: 'hidapi', vid: 0x4321, pid: i }));
   }

@@ -8,7 +8,10 @@ export function DeviceList() {
   const devices = useStore((s) => s.devices);
   const selectedId = useStore((s) => s.selectedId);
   const loaded = useStore((s) => s.devicesLoaded);
-  const connected = devices.filter((d) => d.connected).length;
+  const showHidden = useStore((s) => s.showHidden);
+  const shown = devices.filter((d) => d.usable || showHidden);
+  const hiddenCount = devices.filter((d) => !d.usable).length;
+  const connected = shown.filter((d) => d.connected).length;
 
   return (
     <aside className="side" aria-label="detected devices">
@@ -20,26 +23,34 @@ export function DeviceList() {
       </div>
       <ul className="side__list scroll">
         {!loaded && <li className="label label--hollow">scanning</li>}
-        {loaded && devices.length === 0 && (
+        {loaded && shown.length === 0 && (
           <li className="callout">
             <p className="label" style={{ marginBottom: '.4rem' }}>no devices</p>
             <p className="case__sub">nothing is plugged in, or the os is not letting us see it. plug something in; the list updates on its own.</p>
           </li>
         )}
-        {devices.map((d, i) => (
+        {shown.map((d, i) => (
           <li key={d.id}>
-            <button className={`case ${d.connected ? '' : 'case--gone'}`} aria-pressed={selectedId === d.id} onClick={() => setState({ selectedId: d.id, screen: 'home' })}>
+            <button className={`case ${d.connected ? '' : 'case--gone'} ${d.usable ? '' : 'case--hidden'}`} aria-pressed={selectedId === d.id} onClick={() => setState({ selectedId: d.id, screen: 'home' })}>
               <span className="label case__no">{caseNo(i)} / {kindLabel[d.kind]}</span>
               <span className="case__name">{d.name}</span>
               <span className="case__sub">
                 {vidpid(d.vid, d.pid)} · {backendLabel(d.backend)}
               </span>
               <span className="case__stamp">
-                {d.connected ? <Stamp size="sm">live</Stamp> : <Stamp size="sm" tone="wip">unplugged</Stamp>}
+                {!d.usable ? <Stamp size="sm" tone="wip">interface</Stamp> : d.connected ? <Stamp size="sm">live</Stamp> : <Stamp size="sm" tone="wip">unplugged</Stamp>}
               </span>
             </button>
           </li>
         ))}
+        {hiddenCount > 0 && (
+          <li>
+            <button className="btn btn--sm" aria-pressed={showHidden} onClick={() => setState({ showHidden: !showHidden })}>
+              {showHidden ? 'hide' : 'show'} {hiddenCount} hidden interface{hiddenCount === 1 ? '' : 's'}
+            </button>
+            <p className="case__sub" style={{ marginTop: '.4rem' }}>windows and the hardware expose plumbing next to real devices: config channels, virtual and remote-desktop inputs.</p>
+          </li>
+        )}
       </ul>
     </aside>
   );
