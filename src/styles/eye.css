@@ -96,6 +96,13 @@
   }
   .eye--logo { width: 3rem; }
   .eye--hero { width: min(22rem, 70%); margin-inline: auto; }
+  /* the controller easter egg: --sx / --sy (-1..1, y down) come from the stick, not the pointer */
+  .eye--pad { width: 5.5rem; }
+  .eye--pad .eye__iris {
+    --dx: calc(var(--sx, 0) * 420);
+    --dy: calc(var(--sy, 0) * 420);
+    transition: translate .14s ease-out;
+  }
 }
 
 @layer motion {

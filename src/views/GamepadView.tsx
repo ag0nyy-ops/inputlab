@@ -3,7 +3,9 @@
 // they are pulled), live stick dots, and the tests: circularity, drift, polling,
 // rumble, plus a raw table of every control the pad reports.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Eye } from '../components/Eye';
 import { HexDump, type HexDumpHandle } from '../components/HexDump';
+import { StickGaze } from '../lib/stickGaze';
 import { Stamp } from '../components/Stamp';
 import { FG, LINE, LINE_STRONG, MONO, MUTED, fitCanvas } from '../lib/draw';
 import { addFrame } from '../lib/raf';
@@ -40,6 +42,11 @@ export function GamepadView({ info }: { info: SessionInfo }) {
   const plotR = useRef<HTMLCanvasElement>(null);
   const graph = useRef<HTMLCanvasElement>(null);
   const lastSticks = useRef<{ left: StickSnap; right: StickSnap } | null>(null);
+  // easter egg: the eye follows the stick, once each stick has been checked for drift
+  const eye = useRef<HTMLSpanElement>(null);
+  const gaze = useRef({ left: new StickGaze(), right: new StickGaze() });
+  const eyeAt = useRef<[number, number]>([0, 0]);
+  const [eyeNote, setEyeNote] = useState('');
 
   useEffect(() => {
     const off = onFrame((events) => {
@@ -78,6 +85,23 @@ export function GamepadView({ info }: { info: SessionInfo }) {
     ro.observe(box);
     w = Math.min(520, Math.floor(box.clientWidth));
     const off = addFrame((now) => {
+      const stick = (side: 'left' | 'right'): [number, number] => [vals.current.get(side === 'left' ? 'LeftStickX' : 'RightStickX') ?? 0, vals.current.get(side === 'left' ? 'LeftStickY' : 'RightStickY') ?? 0];
+
+      // the eye: sampled every frame (a resting stick sends no events), written only when it moves
+      const gl = gaze.current.left, gr = gaze.current.right;
+      const [lx, ly] = stick('left'), [rx, ry] = stick('right');
+      gl.feed(lx, ly, now);
+      gr.feed(rx, ry, now);
+      const a = gl.look(lx, ly), b = gr.look(rx, ry);
+      const m = Math.hypot(a[0], a[1]) >= Math.hypot(b[0], b[1]) ? a : b;
+      if (Math.abs(m[0] - eyeAt.current[0]) > 0.004 || Math.abs(m[1] - eyeAt.current[1]) > 0.004) {
+        eyeAt.current = m;
+        eye.current?.style.setProperty('--sx', m[0].toFixed(3));
+        eye.current?.style.setProperty('--sy', (-m[1]).toFixed(3));
+      }
+      const note = [gl.unsettled && `left stick ${gl.state === 'broken' ? 'rests far off-centre' : 'will not hold still'}`, gr.unsettled && `right stick ${gr.state === 'broken' ? 'rests far off-centre' : 'will not hold still'}`].filter(Boolean).join(' · ');
+      setEyeNote((n) => (n === note ? n : note));
+
       const fading = [...upAt.current.values()].some((t) => now - t < GLOW);
       if (!dirty.current && !fading) return;
       dirty.current = false;
@@ -87,7 +111,6 @@ export function GamepadView({ info }: { info: SessionInfo }) {
         if (v <= 0.5 && u !== undefined && now - u < GLOW) return Math.max(v, 1 - (now - u) / GLOW);
         return Math.max(0, Math.min(1, v));
       };
-      const stick = (side: 'left' | 'right'): [number, number] => [vals.current.get(side === 'left' ? 'LeftStickX' : 'RightStickX') ?? 0, vals.current.get(side === 'left' ? 'LeftStickY' : 'RightStickY') ?? 0];
 
       const cv = diagram.current;
       if (cv && w > 50) {
@@ -120,6 +143,8 @@ export function GamepadView({ info }: { info: SessionInfo }) {
   return (
     <div className="gv">
       <div ref={diagramBox} className="gv__pad">
+        <Eye ref={eye} className="eye--pad" blink={8.3} delay={-4.6} />
+        {eyeNote && <p className="label label--sm" style={{ textAlign: 'center' }}>the eye is ignoring · {eyeNote}</p>}
         <canvas ref={diagram} role="img" aria-label={`${match.model?.name ?? 'generic'} controller, lit while buttons are held`} />
         <p className="label label--sm" style={{ textAlign: 'center' }}>{match.model ? match.model.name : 'generic controller'}</p>
         {padInfo?.battery != null && <p className="label label--sm" style={{ textAlign: 'center' }}>battery {padInfo.battery}% · {padInfo.power}</p>}
