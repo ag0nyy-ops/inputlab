@@ -1,3 +1,5 @@
+> **License:** source-available, view and learn only. Not open source. See [LICENSE](LICENSE) before cloning, forking or using this code.
+
 are you sick and tired of shitty keyboard testers and windows' ancient controller page? me too, so i made an app that just works.
 
 # inputlab
@@ -193,7 +195,7 @@ there is no network code, no telemetry, no account. the webview's content securi
 
 ## fonts and licence
 
-the source is viewable, not reusable: you may read it, learn from it, run it and build your own app, but you may not copy the project or pieces of its code. the full terms are in [LICENSE](LICENSE). it is a custom licence, not an open-source one.
+the source is viewable, not reusable: you may read it and learn from it, but you may not copy the project or pieces of its code. the full terms are in [LICENSE](LICENSE). it is a source-available licence, not an open-source one.
 
 the dualsense drawing is the "dualsense" icon from [svgrepo.com](https://www.svgrepo.com/svg/324525/dualsense), used as is and not part of this project's own work. its licence could not be read when it was added (the site was behind a bot check): check it on that page before shipping, and credit the author if it asks for that. the inputs light up on top of it in `src/models/drawDualsense.ts`.
 
