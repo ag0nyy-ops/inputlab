@@ -1,5 +1,5 @@
 # inputlab · © 2026 Jay · https://github.com/ag0nyy-ops/inputlab · source viewable, not reusable: see LICENSE
-# push a tag like v0.1.0 and this builds the installers and attaches them to a draft release.
+# push a tag like v0.1.0 and this builds the installers and attaches them to a draft pre-release.
 # windows is the primary target. macos and linux build as "experimental": a failure there
 # does not stop the windows release.
 name: release
@@ -89,5 +89,7 @@ jobs:
           releaseName: inputlab ${{ inputs.tag || github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
-          prerelease: false
+          # every release ships as a pre-release while the app is in active development.
+          # github never marks a pre-release as "latest", so nothing gets forced there.
+          prerelease: true
           args: ${{ matrix.args }}
