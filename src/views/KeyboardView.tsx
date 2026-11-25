@@ -10,6 +10,7 @@ import { addFrame } from '../lib/raf';
 import { results } from '../lib/results';
 import { onFrame, sendCommand } from '../lib/session';
 import { useSettings } from '../lib/settings';
+import { useStore } from '../lib/store';
 import type { SessionInfo } from '../lib/types';
 import { SIZES, getLayout, keyRects, type KeyDef, type Size, type Variant } from '../layouts/build';
 import { detectFamily, detectSize } from '../layouts/detect';
@@ -31,7 +32,8 @@ interface Live {
 
 export function KeyboardView({ info }: { info: SessionInfo }) {
   const settings = useSettings();
-  const [sizeSel, setSizeSel] = useState<Size>('full');
+  const mac = useStore((st) => st.info?.os) === 'macos';
+  const [sizeSel, setSizeSel] = useState<Size>(mac ? 'macbook' : 'full');
   const [variantSel, setVariantSel] = useState<Variant>('ansi');
   const [variantManual, setVariantManual] = useState(false);
   const [famSel, setFamSel] = useState<LabelFamily | 'auto'>('auto');
@@ -55,8 +57,8 @@ export function KeyboardView({ info }: { info: SessionInfo }) {
   const nativeForLabels = famSel === 'auto' ? native : null; // a manual family means "show me that layout"
 
   // mutable mirror for the draw loop (no react work per frame)
-  const view = useRef({ layout, family, native: nativeForLabels, checklist });
-  view.current = { layout, family, native: nativeForLabels, checklist };
+  const view = useRef({ layout, family, native: nativeForLabels, checklist, mac });
+  view.current = { layout, family, native: nativeForLabels, checklist, mac };
 
   useEffect(() => {
     void loadNativeLabels().then(setNative);
@@ -161,7 +163,7 @@ export function KeyboardView({ info }: { info: SessionInfo }) {
           if (up !== undefined && now - up < GLOW_MS) b = 1 - (now - up) / GLOW_MS;
           else if (depthB !== undefined) b = depthB;
         }
-        drawKey(ctx, k, unit, gap, b, l.tested.has(k.code), l.chatter.has(k.code), v.checklist, labelFor(k.code, v.family, v.native), depthB);
+        drawKey(ctx, k, unit, gap, b, l.tested.has(k.code), l.chatter.has(k.code), v.checklist, labelFor(k.code, v.family, v.native, v.mac), depthB);
       }
       if (fading) l.dirty = true;
     };
@@ -270,7 +272,7 @@ export function KeyboardView({ info }: { info: SessionInfo }) {
             <summary className="label label--sm">untested keys ({untested.length})</summary>
             <p className="kb__chips">
               {untested.map((k) => (
-                <span key={k.code} className="chip">{labelFor(k.code, family, nativeForLabels) || k.code}</span>
+                <span key={k.code} className="chip">{labelFor(k.code, family, nativeForLabels, mac) || k.code}</span>
               ))}
             </p>
           </details>

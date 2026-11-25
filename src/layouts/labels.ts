@@ -15,7 +15,14 @@ const NAMED: Record<string, string> = {
   ContextMenu: 'Menu', Space: '', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
   PrintScreen: 'PrtSc', ScrollLock: 'ScrLk', Pause: 'Pause', Insert: 'Ins', Delete: 'Del', Home: 'Home', End: 'End',
   PageUp: 'PgUp', PageDown: 'PgDn', NumLock: 'Num', NumpadDivide: '/', NumpadMultiply: '*', NumpadSubtract: '-',
-  NumpadAdd: '+', NumpadEnter: 'Ent', NumpadDecimal: '.',
+  NumpadAdd: '+', NumpadEnter: 'Ent', NumpadDecimal: '.', Fn: 'fn',
+};
+
+/** what a mac prints on the same physical keys */
+const MAC_NAMED: Record<string, string> = {
+  Escape: 'esc', Backspace: 'delete', Tab: 'tab', CapsLock: 'caps lock', Enter: 'return', ShiftLeft: '⇧ shift', ShiftRight: '⇧ shift',
+  ControlLeft: '⌃ control', ControlRight: '⌃ control', AltLeft: '⌥ option', AltRight: '⌥ option', MetaLeft: '⌘ command', MetaRight: '⌘ command',
+  Fn: 'fn', Delete: '⌦', Insert: 'help',
 };
 
 /** overrides on top of qwerty, keyed by physical key */
@@ -40,7 +47,8 @@ const FAMILY: Record<Exclude<LabelFamily, 'qwerty'>, Record<string, string>> = {
   },
 };
 
-export function staticLabel(code: string, family: LabelFamily): string {
+export function staticLabel(code: string, family: LabelFamily, mac = false): string {
+  if (mac && code in MAC_NAMED) return MAC_NAMED[code]!;
   if (family !== 'qwerty' && code in FAMILY[family]) return FAMILY[family][code]!;
   if (code in NAMED) return NAMED[code]!;
   if (/^Key[A-Z]$/.test(code)) return code.slice(3);
@@ -51,10 +59,10 @@ export function staticLabel(code: string, family: LabelFamily): string {
 }
 
 /** `native` is the os's own map (code -> printed char), when we have one */
-export function labelFor(code: string, family: LabelFamily, native: Map<string, string> | null): string {
+export function labelFor(code: string, family: LabelFamily, native: Map<string, string> | null, mac = false): string {
   if (native && !(code in NAMED) && !/^(Numpad|F\d)/.test(code)) {
     const n = native.get(code);
     if (n) return n.length === 1 ? n.toUpperCase() : n;
   }
-  return staticLabel(code, family);
+  return staticLabel(code, family, mac);
 }

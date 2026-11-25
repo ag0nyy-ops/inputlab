@@ -83,6 +83,13 @@ pub const MAC_KEYS: &[(&str, u16, u16)] = &[
     ("ControlRight", 0xE4, 0x3E), ("ShiftRight", 0xE5, 0x3C), ("AltRight", 0xE6, 0x3D), ("MetaRight", 0xE7, 0x36),
 ];
 
+/// apple's fn key is not on the keyboard page: it is usage 3 on apple's top case page
+/// (0xff), or on the apple keyboard page (0xff01) on newer boards. mac only, so it is not
+/// in the shared table (it has no windows scancode).
+pub fn apple_fn(page: u32, usage: u32) -> bool {
+    matches!((page, usage), (0xFF, 0x03) | (0xFF01, 0x03))
+}
+
 pub fn from_hid_usage(usage: u32) -> Option<&'static str> {
     MAC_KEYS.iter().find(|k| k.1 as u32 == usage).map(|k| k.0)
 }
@@ -175,5 +182,13 @@ mod tests {
         // error-rollover and out-of-range usages are not keys
         assert_eq!(from_hid_usage(0x01), None);
         assert_eq!(from_hid_usage(0xFFFF_FFFF), None);
+    }
+
+    #[test]
+    fn apple_fn_is_found_on_either_apple_page() {
+        assert!(apple_fn(0xFF, 0x03));
+        assert!(apple_fn(0xFF01, 0x03));
+        assert!(!apple_fn(0x07, 0x03));
+        assert!(!apple_fn(0xFF, 0x04));
     }
 }

@@ -356,6 +356,13 @@ extern "C" fn on_value(_ctx: *mut c_void, _res: IOReturn, _sender: *mut c_void, 
                     emit(RawEvent::Key { src, code, down, ts });
                 }
             }
+            (p, u) if keys::apple_fn(p, u) => {
+                let down = v != 0;
+                if edge(&mut s, held, down) {
+                    KEYS_SEEN.fetch_add(1, Relaxed);
+                    emit(RawEvent::Key { src, code: "Fn", down, ts });
+                }
+            }
             // buttons
             (0x09, 1..=255) => {
                 let down = v != 0;

@@ -98,3 +98,31 @@ describe('labels', () => {
     expect(labelFor('Enter', 'qwerty', native)).toBe('Enter');
   });
 });
+
+describe('macbook', () => {
+  it('is 14.5u wide with fn, a half-height function row and inverted-t arrows', () => {
+    const l = buildLayout('macbook', 'ansi');
+    expect(l.w).toBe(14.5);
+    expect(l.keys.length).toBe(77);
+    const k = (c: string) => l.keys.find((x) => x.code === c)!;
+    expect(k('Fn').x).toBe(0);
+    expect(k('F1').h).toBe(0.5);
+    expect(k('ArrowUp').y + k('ArrowUp').h).toBe(k('ArrowDown').y);
+    expect(l.keys.some((x) => x.code === 'ContextMenu' || x.code === 'ControlRight')).toBe(false);
+  });
+  it('iso adds the key by the left shift and a tall return', () => {
+    const l = buildLayout('macbook', 'iso');
+    expect(l.w).toBe(14.5);
+    expect(l.keys.length).toBe(78);
+    expect(l.keys.find((x) => x.code === 'Enter')?.shape).toBe('isoEnter');
+  });
+  it('labels modifiers the mac way only on a mac', () => {
+    expect(labelFor('MetaLeft', 'qwerty', null, true)).toBe('⌘ command');
+    expect(labelFor('AltLeft', 'qwerty', null, true)).toBe('⌥ option');
+    expect(labelFor('ControlLeft', 'qwerty', null, true)).toBe('⌃ control');
+    expect(labelFor('Backspace', 'qwerty', null, true)).toBe('delete');
+    expect(labelFor('Fn', 'qwerty', null, true)).toBe('fn');
+    expect(labelFor('MetaLeft', 'qwerty', null)).toBe('Win');
+    expect(staticLabel('KeyA', 'qwerty', true)).toBe('A');
+  });
+});
