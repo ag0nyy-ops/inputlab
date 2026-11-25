@@ -30,7 +30,7 @@ use core_foundation_sys::array::CFArrayRef;
 use core_foundation_sys::base::{kCFAllocatorDefault, CFAllocatorRef, CFIndex, CFRelease};
 use core_foundation_sys::data::{CFDataGetBytePtr, CFDataRef};
 use core_foundation_sys::dictionary::CFDictionaryRef;
-use core_foundation_sys::mach_port::{CFMachPortCreateRunLoopSource, CFMachPortRef};
+use core_foundation_sys::mach_port::{CFMachPortCreateRunLoopSource, CFMachPortInvalidate, CFMachPortRef};
 use core_foundation_sys::runloop::{
     kCFRunLoopBeforeWaiting, kCFRunLoopCommonModes, kCFRunLoopDefaultMode, CFRunLoopActivity, CFRunLoopAddObserver, CFRunLoopAddSource, CFRunLoopGetCurrent,
     CFRunLoopObserverCreate, CFRunLoopObserverRef, CFRunLoopRef, CFRunLoopRun, CFRunLoopRunInMode, CFRunLoopWakeUp,
@@ -453,7 +453,7 @@ fn hid_thread() {
         // kIOHIDOptionsTypeNone: shared, never seize. denied input monitoring shows up here
         // as not-permitted, but mice still open.
         OPEN_RESULT.store(IOHIDManagerOpen(mgr, 0), SeqCst);
-        hid_log(|| format!("open {:#x} listen access {}", OPEN_RESULT.load(SeqCst), IOHIDCheckAccess(HID_REQUEST_LISTEN)));
+        hid_log(|| format!("open {:#x} listen access {} accessibility {}", OPEN_RESULT.load(SeqCst), IOHIDCheckAccess(HID_REQUEST_LISTEN), AXIsProcessTrusted()));
         // the manager and its callbacks live as long as the process
         CFRunLoopRun();
     }
@@ -625,7 +625,18 @@ fn accessibility_trusted(prompt: bool) -> bool {
 fn ensure_tap() -> Result<CFMachPortRef, String> {
     let t = TAP.load(SeqCst);
     if t != 0 {
-        return Ok(t as CFMachPortRef);
+        if !TAP_LISTEN_ONLY.load(SeqCst) || !accessibility_trusted(false) {
+            return Ok(t as CFMachPortRef);
+        }
+        // accessibility was turned on since the tap was made: swap the listen-only tap for a
+        // blocking one without a restart
+        unsafe {
+            CGEventTapEnable(t as CFMachPortRef, false);
+            CFMachPortInvalidate(t as CFMachPortRef);
+            CFRelease(t as *const c_void);
+        }
+        TAP.store(0, SeqCst);
+        TAP_LISTEN_ONLY.store(false, SeqCst);
     }
     // asks for accessibility where macos still has that switch. the tap is tried either way:
     // a listen-only tap needs just input monitoring and still sees right clicks and scrolls.
@@ -762,7 +773,7 @@ impl Platform for MacPlatform {
                 MODE.store(if spec.mode == CaptureMode::Mouse { MODE_MOUSE } else { MODE_KEYS }, SeqCst);
                 unsafe { CGEventTapEnable(tap, true) };
                 if TAP_LISTEN_ONLY.load(SeqCst) {
-                    rep.warnings.push("macos only lets inputlab listen, not block: shortcuts, clicks and the function row (brightness, volume) still act during a test. right clicks and scrolls are still read.".into());
+                    rep.warnings.push("macos only lets inputlab listen, not block: shortcuts, clicks and the function row (brightness, volume) still act during a test. turn on inputlab under privacy & security > accessibility (device control and data access on newer macos) to block them. right clicks and scrolls are still read.".into());
                 } else if spec.mode == CaptureMode::Mouse {
                     rep.mouse_swallowed = true;
                 } else {
