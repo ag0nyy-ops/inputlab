@@ -287,11 +287,13 @@ pub fn build_device_list(inp: &ScanInputs) -> Vec<DeviceInfo> {
         let product = product_for(&inp.hid, vid, pid);
         let lname = product.as_deref().unwrap_or("").to_lowercase();
         let receiver = lname.contains("receiver") || lname.contains("dongle");
+        // a laptop's built-in "keyboard / trackpad" shares one id but is two devices
+        let with_pad = lname.contains("trackpad") || lname.contains("touchpad");
 
         // one entry per kind when the ids are shared by genuinely different things (a wireless
         // receiver with a keyboard and a mouse paired); otherwise the keyboard interface of a mouse
         // (macro keys) is a side channel of that mouse, not a keyboard.
-        let split = vid.is_none() || receiver;
+        let split = vid.is_none() || receiver || with_pad;
         let kinds: Vec<DeviceKind> = if has_k && has_m && !split {
             let keyboardish = lname.contains("keyboard") || lname.contains("keypad");
             vec![if keyboardish { DeviceKind::Keyboard } else { DeviceKind::Mouse }]
@@ -605,6 +607,16 @@ mod tests {
         assert_eq!(visible(&list).len(), 1);
         assert_eq!(visible(&list)[0].kind, DeviceKind::Mouse);
         assert_eq!(list.len(), 2, "the keyboard half is still there under hidden");
+    }
+
+    #[test]
+    fn a_macbook_keyboard_and_trackpad_are_two_devices() {
+        let mut i = inputs();
+        i.raw = vec![raw(1, DeviceKind::Keyboard, Some(0x05ac), Some(0x0343)), raw(2, DeviceKind::Mouse, Some(0x05ac), Some(0x0343))];
+        i.hid = vec![hid(0x05ac, 0x0343, 1, 6, 0, "Apple Internal Keyboard / Trackpad")];
+        let list = build_device_list(&i);
+        let kinds: Vec<_> = visible(&list).iter().map(|d| (d.kind, d.srcs.clone())).collect();
+        assert_eq!(kinds, vec![(DeviceKind::Keyboard, vec![1]), (DeviceKind::Mouse, vec![2])]);
     }
 
     #[test]
