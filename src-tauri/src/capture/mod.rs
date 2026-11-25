@@ -2,7 +2,7 @@
 //! test-session capture rules. this module is pure logic (no os calls) so the
 //! exit rules, the part that must never trap the user, are unit tested.
 //!
-//!   mouse under test    -> hold esc ~1s. nothing the mouse does can leave.
+//!   mouse under test    -> press esc on a keyboard. nothing the mouse does can leave.
 //!   keyboard under test -> exit button, or hold ctrl+alt+shift+backspace ~1.5s
 //!   anything else       -> exit button only. gamepad buttons never exit.
 
@@ -13,13 +13,11 @@ use serde::{Deserialize, Serialize};
 use crate::keys::{is_alt, is_ctrl, is_shift};
 use crate::platform::{CaptureMode, SrcId};
 
-pub const ESC_HOLD_DEFAULT_MS: u32 = 1000;
 pub const COMBO_HOLD_DEFAULT_MS: u32 = 1500;
 
 #[derive(Deserialize, Clone, Copy, Debug)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SessionSettings {
-    pub esc_hold_ms: u32,
     pub combo_hold_ms: u32,
     pub chatter_ms: f64,
     /// safe mode from the settings screen: same as launching with --no-capture
@@ -28,7 +26,7 @@ pub struct SessionSettings {
 
 impl Default for SessionSettings {
     fn default() -> Self {
-        Self { esc_hold_ms: ESC_HOLD_DEFAULT_MS, combo_hold_ms: COMBO_HOLD_DEFAULT_MS, chatter_ms: crate::timing::keystats::CHATTER_DEFAULT_MS, disable_capture: false }
+        Self { combo_hold_ms: COMBO_HOLD_DEFAULT_MS, chatter_ms: crate::timing::keystats::CHATTER_DEFAULT_MS, disable_capture: false }
     }
 }
 
@@ -37,7 +35,6 @@ impl SessionSettings {
     /// the exit instant by accident nor so slow it is unusable.
     pub fn sanitized(self) -> Self {
         Self {
-            esc_hold_ms: self.esc_hold_ms.clamp(300, 5000),
             combo_hold_ms: self.combo_hold_ms.clamp(500, 6000),
             chatter_ms: if self.chatter_ms.is_finite() { self.chatter_ms.clamp(5.0, 200.0) } else { 30.0 },
             disable_capture: self.disable_capture,
@@ -54,7 +51,8 @@ pub enum ExitKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExitRule {
-    EscHold { hold_ns: u64 },
+    /// one press of esc, so a quick tap can never be missed
+    Esc,
     Combo { hold_ns: u64 },
     /// exit button only
     None,
@@ -63,7 +61,7 @@ pub enum ExitRule {
 impl ExitRule {
     pub fn for_mode(mode: CaptureMode, s: &SessionSettings) -> Self {
         match mode {
-            CaptureMode::Mouse => ExitRule::EscHold { hold_ns: s.esc_hold_ms as u64 * 1_000_000 },
+            CaptureMode::Mouse => ExitRule::Esc,
             CaptureMode::Keyboard => ExitRule::Combo { hold_ns: s.combo_hold_ms as u64 * 1_000_000 },
             CaptureMode::Other => ExitRule::None,
         }
@@ -71,7 +69,7 @@ impl ExitRule {
 
     pub fn kind(&self) -> Option<ExitKind> {
         match self {
-            ExitRule::EscHold { .. } => Some(ExitKind::Esc),
+            ExitRule::Esc => Some(ExitKind::Esc),
             ExitRule::Combo { .. } => Some(ExitKind::Combo),
             ExitRule::None => None,
         }
@@ -131,7 +129,7 @@ impl ExitTracker {
     fn condition(&self) -> bool {
         match self.rule {
             ExitRule::None => false,
-            ExitRule::EscHold { .. } => self.any(|k| k == "Escape"),
+            ExitRule::Esc => self.any(|k| k == "Escape"),
             ExitRule::Combo { .. } => {
                 self.any(is_ctrl) && self.any(is_alt) && self.any(is_shift) && self.any(|k| k == "Backspace")
             }
@@ -143,6 +141,8 @@ impl ExitTracker {
             return;
         }
         if self.condition() {
+            // the press itself fires: a tap can start and end between two ticks
+            self.fired = self.rule == ExitRule::Esc;
             self.since.get_or_insert(now);
         } else {
             self.since = None;
@@ -151,8 +151,8 @@ impl ExitTracker {
 
     pub fn tick(&mut self, now: u64) -> ExitState {
         let hold = match self.rule {
-            ExitRule::EscHold { hold_ns } | ExitRule::Combo { hold_ns } => hold_ns,
-            ExitRule::None => return ExitState { progress: 0.0, fired: false },
+            ExitRule::Combo { hold_ns } => hold_ns,
+            ExitRule::Esc | ExitRule::None => return ExitState { progress: if self.fired { 1.0 } else { 0.0 }, fired: self.fired },
         };
         if self.fired {
             return ExitState { progress: 1.0, fired: true };
@@ -186,7 +186,7 @@ pub fn exit_info(mode: CaptureMode, s: &SessionSettings, capture_disabled: bool)
     ExitInfo {
         kind: rule.kind(),
         hold_ms: match rule {
-            ExitRule::EscHold { .. } => s.esc_hold_ms,
+            ExitRule::Esc => 0,
             ExitRule::Combo { .. } => s.combo_hold_ms,
             ExitRule::None => 0,
         },
@@ -207,44 +207,28 @@ mod tests {
     const MS: u64 = 1_000_000;
 
     fn esc() -> ExitTracker {
-        ExitTracker::new(ExitRule::EscHold { hold_ns: 1000 * MS })
+        ExitTracker::new(ExitRule::Esc)
     }
     fn combo() -> ExitTracker {
         ExitTracker::new(ExitRule::Combo { hold_ns: 1500 * MS })
     }
 
     #[test]
-    fn esc_hold_fires_after_hold_time() {
+    fn esc_press_fires_at_once() {
         let mut t = esc();
+        assert!(!t.tick(0).fired);
         t.key(1, "Escape", true, 0);
-        assert!(!t.tick(500 * MS).fired);
-        let s = t.tick(500 * MS);
-        assert!((s.progress - 0.5).abs() < 0.01);
-        assert!(!t.tick(999 * MS).fired);
-        assert!(t.tick(1000 * MS).fired);
+        assert!(t.tick(0).fired);
     }
 
     #[test]
-    fn esc_release_resets_progress() {
+    fn an_esc_tap_between_ticks_still_fires() {
         let mut t = esc();
         t.key(1, "Escape", true, 0);
-        assert!(t.tick(900 * MS).progress > 0.8);
-        t.key(1, "Escape", false, 900 * MS);
-        assert_eq!(t.tick(950 * MS).progress, 0.0);
-        // pressing again starts a fresh hold, not the old one
-        t.key(1, "Escape", true, 1000 * MS);
-        assert!(!t.tick(1900 * MS).fired);
-        assert!(t.tick(2000 * MS).fired);
-    }
-
-    #[test]
-    fn auto_repeat_does_not_restart_the_hold() {
-        let mut t = esc();
-        t.key(1, "Escape", true, 0);
-        for i in 1..10 {
-            t.key(1, "Escape", true, i * 100 * MS); // os key repeat
-        }
-        assert!(t.tick(1000 * MS).fired);
+        t.key(1, "Escape", false, 30 * MS);
+        let st = t.tick(50 * MS);
+        assert!(st.fired);
+        assert_eq!(st.progress, 1.0);
     }
 
     #[test]
@@ -361,8 +345,7 @@ mod tests {
 
     #[test]
     fn settings_are_clamped() {
-        let s = SessionSettings { esc_hold_ms: 0, combo_hold_ms: 10_000_000, chatter_ms: f64::NAN, disable_capture: false }.sanitized();
-        assert_eq!(s.esc_hold_ms, 300);
+        let s = SessionSettings { combo_hold_ms: 10_000_000, chatter_ms: f64::NAN, disable_capture: false }.sanitized();
         assert_eq!(s.combo_hold_ms, 6000);
         assert_eq!(s.chatter_ms, 30.0);
     }

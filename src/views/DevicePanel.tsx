@@ -32,7 +32,6 @@ function Rules({ dev }: { dev: DeviceInfo }) {
   const os = useStore((st) => st.info?.os);
   const lock = keyboardLockText(os);
   const noCapture = flag || s.safeMode;
-  const esc = (s.escHoldMs / 1000).toString();
   const combo = (s.comboHoldMs / 1000).toString();
   return (
     <div className="callout">
@@ -42,7 +41,7 @@ function Rules({ dev }: { dev: DeviceInfo }) {
       ) : dev.viewer === 'mouse' ? (
         <p>
           the mouse is fully captured: the cursor is locked to this window and hidden, clicks and wheel never reach other apps, and there is no exit button.
-          hold <Kbd>esc</Kbd> for {esc}s to leave.
+          press <Kbd>esc</Kbd> on a keyboard to leave.
         </p>
       ) : dev.viewer === 'keyboard' ? (
         <p>

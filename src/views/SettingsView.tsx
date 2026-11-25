@@ -54,7 +54,6 @@ export function SettingsView() {
         <p className="case__sub">same as starting with --no-capture. the mouse and keyboard stay free, nothing is hooked, and the exit button works in every test. turn it on the first time you try a new machine.</p>
       </div>
 
-      <NumberField label="esc hold (mouse tests)" value={s.escHoldMs} min={300} max={5000} unit="ms" hint="how long esc is held to leave a mouse test. 300 to 5000." onValid={(n) => updateSettings({ escHoldMs: n })} />
       <NumberField label="exit combo hold (keyboard tests)" value={s.comboHoldMs} min={500} max={6000} unit="ms" hint="how long ctrl+alt+shift+backspace is held. 500 to 6000." onValid={(n) => updateSettings({ comboHoldMs: n })} />
 
       <NumberField label="chatter threshold" value={s.chatterMs} min={5} max={200} unit="ms" hint="a key or button that comes back faster than this after release counts as chatter. 5 to 200." onValid={(n) => updateSettings({ chatterMs: n })} />

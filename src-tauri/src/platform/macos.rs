@@ -648,7 +648,7 @@ impl Platform for MacPlatform {
         let keys_readable = listen_access() == HID_ACCESS_GRANTED;
         if spec.mode == CaptureMode::Mouse && !keys_readable {
             // esc-hold is the only way out of a mouse test: never arm it blind
-            rep.warnings.push("keyboards are unreadable (input monitoring is off), so the mouse is left free: holding esc could not end the test.".into());
+            rep.warnings.push("keyboards are unreadable (input monitoring is off), so the mouse is left free: pressing esc could not end the test.".into());
             return Ok(rep);
         }
         if spec.mode == CaptureMode::Mouse {

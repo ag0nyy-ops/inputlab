@@ -274,8 +274,11 @@ impl Session {
     pub fn on_raw(&mut self, ev: &RawEvent) {
         match ev {
             RawEvent::Key { src, code, down, ts } => {
-                // the exit rules listen to every keyboard, not just the one under test
-                self.exit.key(*src, code, *down, *ts);
+                // the exit rules listen to every keyboard, but a mouse under test can't leave
+                // through its own macro keys
+                if !(self.device.viewer == Viewer::Mouse && self.srcs.contains(src)) {
+                    self.exit.key(*src, code, *down, *ts);
+                }
                 if *down {
                     self.all_down.insert(code);
                 } else {
@@ -1045,19 +1048,18 @@ mod tests {
     }
 
     #[test]
-    fn mouse_session_exits_on_esc_hold_only() {
+    fn mouse_session_exits_on_an_esc_tap() {
         let mut s = mouse_session();
+        assert_eq!(s.tick(T0), None);
         s.on_raw(&key(1, "Escape", true, T0));
-        assert_eq!(s.tick(T0 + 500 * MS), None);
-        assert_eq!(s.tick(T0 + 1000 * MS), Some(EndReason::EscHold));
+        s.on_raw(&key(1, "Escape", false, T0 + 40 * MS));
+        assert_eq!(s.tick(T0 + 50 * MS), Some(EndReason::EscHold));
     }
 
     #[test]
-    fn mouse_session_esc_released_early_stays_open() {
+    fn esc_from_the_mouse_under_test_does_not_exit() {
         let mut s = mouse_session();
-        s.on_raw(&key(1, "Escape", true, T0));
-        assert_eq!(s.tick(T0 + 900 * MS), None);
-        s.on_raw(&key(1, "Escape", false, T0 + 900 * MS));
+        s.on_raw(&key(5, "Escape", true, T0));
         assert_eq!(s.tick(T0 + 5000 * MS), None);
     }
 
@@ -1173,10 +1175,12 @@ mod tests {
 
     #[test]
     fn exit_progress_events_are_sent_and_reset_to_zero() {
-        let mut s = mouse_session();
-        s.on_raw(&key(1, "Escape", true, T0));
-        s.tick(T0 + 400 * MS);
-        s.on_raw(&key(1, "Escape", false, T0 + 400 * MS));
+        let mut s = kbd_session();
+        for k in ["ControlLeft", "AltLeft", "ShiftLeft", "Backspace"] {
+            s.on_raw(&key(1, k, true, T0));
+        }
+        s.tick(T0 + 600 * MS);
+        s.on_raw(&key(1, "Backspace", false, T0 + 600 * MS));
         s.tick(T0 + 410 * MS);
         let f = s.take_frame().unwrap();
         let ps: Vec<f32> = f.events.iter().filter_map(|e| if let Ev::Exit { progress, .. } = e { Some(*progress) } else { None }).collect();
@@ -1632,7 +1636,7 @@ mod engine_thread_tests {
             let (tx, rx) = mpsc::channel();
             let req = StartReq {
                 device: d,
-                settings: SessionSettings { esc_hold_ms: 400, combo_hold_ms: 600, chatter_ms: 30.0, disable_capture: false }.sanitized(),
+                settings: SessionSettings { combo_hold_ms: 600, chatter_ms: 30.0, disable_capture: false }.sanitized(),
                 window: None,
                 sink: Box::new(Collect { frames: self.frames.clone(), alive: self.alive.clone() }),
                 reply: tx,
@@ -1662,28 +1666,28 @@ mod engine_thread_tests {
     }
 
     #[test]
-    fn mouse_session_arms_mouse_capture_and_ends_on_esc_hold() {
+    fn mouse_session_arms_mouse_capture_and_ends_on_an_esc_tap() {
         let r = rig();
         let info = r.start(DeviceKind::Mouse, Viewer::Mouse).unwrap();
         assert!(!info.exit.button, "no exit control in a mouse session");
         assert_eq!(*r.fake.begins.lock().unwrap(), vec![CaptureMode::Mouse]);
         assert!(r.active());
         r.key(9, "Escape", true);
-        assert!(r.wait_inactive(1500), "esc held past the hold time must end the session");
+        r.key(9, "Escape", false);
+        assert!(r.wait_inactive(1500), "a tap of esc on a keyboard must end the session");
         assert_eq!(r.ended_with(), Some(EndReason::EscHold));
         assert_eq!(r.ends(), 1, "capture must be released exactly when the session ends");
     }
 
     #[test]
-    fn mouse_session_survives_a_short_esc_tap_and_hostile_mouse_input() {
+    fn mouse_session_survives_esc_from_its_own_macro_keys_and_hostile_mouse_input() {
         let r = rig();
         r.start(DeviceKind::Mouse, Viewer::Mouse).unwrap();
-        r.key(9, "Escape", true);
-        std::thread::sleep(Duration::from_millis(150));
-        r.key(9, "Escape", false);
+        r.key(1, "Escape", true);
+        r.key(1, "Escape", false);
         for i in 0..500 {
-            r.raw(RawEvent::MouseButton { src: 5, button: (i % 5 + 1) as u8, down: i % 2 == 0, ts: now_ns() });
-            r.raw(RawEvent::Wheel { src: 5, dx: 0, dy: 120, ts: now_ns() });
+            r.raw(RawEvent::MouseButton { src: 1, button: (i % 5 + 1) as u8, down: i % 2 == 0, ts: now_ns() });
+            r.raw(RawEvent::Wheel { src: 1, dx: 0, dy: 120, ts: now_ns() });
         }
         std::thread::sleep(Duration::from_millis(700));
         assert!(r.active());

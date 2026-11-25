@@ -84,11 +84,11 @@ export function SessionScreen() {
       </section>
 
       <footer className="session__exit">
-        {s.exit.kind && <ExitRing kind={s.exit.kind} label={s.exit.kind === 'esc' ? 'esc hold progress' : 'exit combo progress'} />}
+        {s.exit.kind === 'combo' && <ExitRing kind="combo" label="exit combo progress" />}
         <div className="session__hint">
           {s.mode === 'mouse' && (
             <p className="label">
-              hold <Kbd>esc</Kbd> for {secs(s.exit.holdMs)} to leave{s.exit.button ? ' / or use the exit button' : ''}
+              press <Kbd>esc</Kbd> to leave{s.exit.button ? ' / or use the exit button' : ''}
             </p>
           )}
           {s.mode === 'keyboard' && (

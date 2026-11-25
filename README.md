@@ -56,7 +56,7 @@ a test session captures the device under test so nothing leaks to other apps. le
 
 | testing | what is captured | how to leave |
 | --- | --- | --- |
-| a **mouse** | cursor locked to the window and hidden, clicks and wheel swallowed, no on-screen exit control at all | **hold esc** for about 1 s (adjustable in settings). a ring shows progress. nothing the mouse does can leave the session. |
+| a **mouse** | cursor locked to the window and hidden, clicks and wheel swallowed, no on-screen exit control at all | **press esc** on a keyboard. nothing the mouse does can leave the session, including its own macro keys. |
 | a **keyboard** | shortcuts blocked at the lowest level the os allows (esc, alt+f4, alt+tab, the win key, ctrl+w, f5, f11...) so they register as test keys. the window close button does nothing. | click the big **exit** button, **or** hold **ctrl+alt+shift+backspace** for about 1.5 s. the combo is always shown on screen, and it is read from the raw input stream in rust, from any connected keyboard, so a dead keyboard under test cannot trap you. |
 | a **controller, hid or midi device** | same keyboard lockdown, mouse stays free | click the **exit** button. controller buttons never exit. |
 

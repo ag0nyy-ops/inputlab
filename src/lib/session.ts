@@ -45,7 +45,7 @@ function teardown(reason: EndReason): void {
 export async function startSession(deviceId: string): Promise<SessionInfo> {
   const b = await getBridge();
   const s = getSettings();
-  const info = await b.startSession(deviceId, { escHoldMs: s.escHoldMs, comboHoldMs: s.comboHoldMs, chatterMs: s.chatterMs, disableCapture: s.safeMode }, dispatch);
+  const info = await b.startSession(deviceId, { comboHoldMs: s.comboHoldMs, chatterMs: s.chatterMs, disableCapture: s.safeMode }, dispatch);
   document.body.classList.add('capturing');
   if (info.mode === 'mouse') document.body.classList.add('capturing-mouse');
   // rust ends the session itself if these stop (a frozen ui can never trap the user)
