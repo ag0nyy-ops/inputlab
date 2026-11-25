@@ -30,7 +30,17 @@ static API: OnceLock<Result<Mutex<HidApi>, String>> = OnceLock::new();
 
 /// the one shared hidapi context. none when hidapi failed to initialise.
 pub fn api() -> Option<&'static Mutex<HidApi>> {
-    API.get_or_init(|| HidApi::new().map(Mutex::new).map_err(|e| e.to_string()))
+    API.get_or_init(|| {
+        HidApi::new()
+            .map(|api| {
+                // macos hidapi seizes devices by default, which would starve the system, gilrs
+                // and inputlab's own iokit reader of the same keyboard or controller
+                #[cfg(target_os = "macos")]
+                api.set_open_exclusive(false);
+                Mutex::new(api)
+            })
+            .map_err(|e| e.to_string())
+    })
         .as_ref()
         .ok()
 }

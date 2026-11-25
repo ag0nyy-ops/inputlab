@@ -46,7 +46,7 @@ first run: start it once with `--no-capture` (below) and look around. then try a
 | --- | --- | --- |
 | windows | primary | raw input (`WM_INPUT` on a dedicated time-critical thread that re-registers itself, because the window toolkit's own registration would otherwise replace it), low-level hooks, `ClipCursor` and a `QueryPerformanceCounter` clock are implemented. the unit tests run on a windows runner in ci and pass there, which also proves the raw input and hook code compiles on windows. the author has not yet run the lockdown paths on real hardware, so test with `--no-capture` first and report anything odd. |
 | linux | experimental | evdev readers with kernel timestamps and an exclusive-grab capture. needs read access to `/dev/input` (the `input` group). runs headless in ci-style containers; not yet tried on real keyboards and mice. |
-| macos | stub | devices are listed through the iokit hid manager. live keyboard/mouse input, polling and capture are not written yet. controllers, midi and generic hid use cross-platform libraries and may work. |
+| macos | experimental | iokit hid manager for keyboards and mice (per-device, hardware timestamps), a quartz event tap for capture, a frozen hidden cursor in mouse tests, and layout labels from the active input source. needs **input monitoring** (to read keyboards) and **accessibility** (to block shortcuts) in system settings > privacy & security. the exit combo is control + option + shift + delete. builds in ci; not yet tried on a real mac. |
 
 the frontend is only a renderer. every device read, timestamp and calculation happens in rust behind a `Platform` trait, so adding an os means implementing one file.
 
@@ -171,7 +171,7 @@ these cannot be proven from a code review or a container. if you have the hardwa
 
 ```
 src-tauri/src/
-  platform/   os raw input + capture behind one trait (windows, linux, macos stub)
+  platform/   os raw input + capture behind one trait (windows, linux, macos)
   devices/    device list merge, hot-plug hub, gilrs and midi
   hid/        hidapi enumeration, report reader, descriptor parser, analog profiles
   capture/    session modes and the exit rules (pure logic, unit tested)
@@ -187,7 +187,7 @@ src/
 
 ## releases
 
-pushing a tag like `v0.1.0` (or running the workflow by hand with a version) runs `.github/workflows/release.yml`, which builds the windows `.msi` and `.exe` (plus experimental macos and linux bundles) and attaches them to a draft release. ci (`ci.yml`) runs the frontend checks and the rust tests on linux and windows for every push and pull request.
+pushing a tag like `v0.1.0` (or running the workflow by hand with a version) runs `.github/workflows/release.yml`, which builds the windows `.msi` and `.exe` (plus experimental macos and linux bundles) and attaches them to a draft release. ci (`ci.yml`) runs the frontend checks and the rust tests on linux, windows and macos for every push and pull request, then builds unsigned bundles for all three and keeps them as workflow artifacts.
 
 ## privacy
 

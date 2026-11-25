@@ -10,11 +10,13 @@ import { Kbd } from '../components/Kbd';
 import { Stamp } from '../components/Stamp';
 import { endSession } from '../lib/session';
 import { useStore } from '../lib/store';
+import { exitComboKeys } from '../lib/osKeys';
 import { SessionBody } from './SessionBody';
 import { deviceTitle, usePick } from '../models/pick';
 
 export function SessionScreen() {
   const s = useStore((st) => st.session);
+  const os = useStore((st) => st.info?.os);
   const pick = usePick(useStore((st) => st.session?.device) ?? { id: '', vid: null, pid: null });
   const [notices, setNotices] = useState<string[]>([]);
   const [capText, setCapText] = useState('');
@@ -91,7 +93,14 @@ export function SessionScreen() {
           )}
           {s.mode === 'keyboard' && (
             <p className="label">
-              or hold <Kbd>ctrl</Kbd> + <Kbd>alt</Kbd> + <Kbd>shift</Kbd> + <Kbd>backspace</Kbd> for {secs(s.exit.holdMs)}
+              or hold{' '}
+              {exitComboKeys(os).map((k, i) => (
+                <span key={k}>
+                  {i > 0 && ' + '}
+                  <Kbd>{k}</Kbd>
+                </span>
+              ))}{' '}
+              for {secs(s.exit.holdMs)}
             </p>
           )}
           {s.mode === 'other' && <p className="label">controller and device buttons never exit. use the button.</p>}

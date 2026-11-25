@@ -45,6 +45,10 @@
     "windows": {
       "wix": { "language": "en-US" }
     },
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "11.0"
+    },
     "linux": {
       "appimage": { "bundleMediaFramework": false }
     }

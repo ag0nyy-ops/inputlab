@@ -153,6 +153,8 @@ pub fn emergency_release() {
     win::emergency_release();
     #[cfg(target_os = "linux")]
     linux::emergency_release();
+    #[cfg(target_os = "macos")]
+    macos::emergency_release();
 }
 
 /// pull vid/pid out of a windows raw-input device path. usb looks like

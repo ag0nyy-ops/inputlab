@@ -6,15 +6,31 @@ import { Kbd } from '../components/Kbd';
 import { Stamp } from '../components/Stamp';
 import { backendLabel, kindLabel, vidpid } from '../lib/format';
 import { endMessages } from '../lib/messages';
+import { exitComboKeys, keyboardLockText } from '../lib/osKeys';
 import { startSession } from '../lib/session';
 import { useSettings } from '../lib/settings';
 import { selectedDevice, useStore } from '../lib/store';
 import { deviceTitle, usePick } from '../models/pick';
 import type { DeviceInfo } from '../lib/types';
 
+function Combo({ keys }: { keys: string[] }) {
+  return (
+    <>
+      {keys.map((k, i) => (
+        <span key={k}>
+          {i > 0 && ' + '}
+          <Kbd>{k}</Kbd>
+        </span>
+      ))}
+    </>
+  );
+}
+
 function Rules({ dev }: { dev: DeviceInfo }) {
   const s = useSettings();
   const flag = useStore((st) => st.info?.noCapture);
+  const os = useStore((st) => st.info?.os);
+  const lock = keyboardLockText(os);
   const noCapture = flag || s.safeMode;
   const esc = (s.escHoldMs / 1000).toString();
   const combo = (s.comboHoldMs / 1000).toString();
@@ -30,8 +46,8 @@ function Rules({ dev }: { dev: DeviceInfo }) {
         </p>
       ) : dev.viewer === 'keyboard' ? (
         <p>
-          shortcuts are blocked so they register as test keys: esc, alt+f4, alt+tab, the win key and the rest. leave with the exit button, or hold{' '}
-          <Kbd>ctrl</Kbd> + <Kbd>alt</Kbd> + <Kbd>shift</Kbd> + <Kbd>backspace</Kbd> for {combo}s from any keyboard. ctrl+alt+del cannot be blocked and is shown as reserved.
+          shortcuts are blocked so they register as test keys: {lock.blocked}. leave with the exit button, or hold{' '}
+          <Combo keys={exitComboKeys(os)} /> for {combo}s from any keyboard. {lock.reserved}
         </p>
       ) : (
         <p>keyboard shortcuts are blocked during this test, and controller buttons never exit. the only way out is the exit button, with the mouse.</p>
