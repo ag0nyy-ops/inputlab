@@ -89,7 +89,7 @@ export function mockBridge(): Bridge {
       let seq = 0;
       let buf: Ev[] = [];
       const t0 = performance.now();
-      const holdMs = mode === 'mouse' ? settings.escHoldMs : settings.comboHoldMs;
+      const holdMs = mode === 'mouse' ? 0 : settings.comboHoldMs; // esc ends a mouse test on the press
       const cond = () => (mode === 'mouse' ? down.has('Escape') : mode === 'keyboard' ? ['Control', 'Alt', 'Shift'].every((m) => [...down].some((k) => k.startsWith(m))) && down.has('Backspace') : false);
       const onKey = (e: KeyboardEvent, isDown: boolean) => {
         e.preventDefault();
@@ -204,7 +204,7 @@ export function mockBridge(): Bridge {
       };
       timer = window.setInterval(() => {
         if (mode !== 'other') {
-          const p = since ? Math.min(1, (performance.now() - since) / holdMs) : 0;
+          const p = since ? (holdMs ? Math.min(1, (performance.now() - since) / holdMs) : 1) : 0;
           if (p !== last) {
             last = p;
             buf.push({ t: 'exit', kind: mode === 'mouse' ? 'esc' : 'combo', progress: p });
@@ -226,7 +226,7 @@ export function mockBridge(): Bridge {
       const info2: SessionInfo = {
         device,
         mode,
-        exit: { kind: mode === 'mouse' ? 'esc' : mode === 'keyboard' ? 'combo' : null, holdMs: mode === 'mouse' ? settings.escHoldMs : settings.comboHoldMs, button: mode !== 'mouse' || noCapture, combo: mode === 'keyboard' ? ['ControlLeft', 'AltLeft', 'ShiftLeft', 'Backspace'] : [] },
+        exit: { kind: mode === 'mouse' ? 'esc' : mode === 'keyboard' ? 'combo' : null, holdMs: mode === 'mouse' ? 0 : settings.comboHoldMs, button: mode !== 'mouse' || noCapture, combo: mode === 'keyboard' ? ['ControlLeft', 'AltLeft', 'ShiftLeft', 'Backspace'] : [] },
         capture: noCapture
           ? { active: false, cursorClipped: false, keyboardHooked: false, mouseSwallowed: false, warnings: ['--no-capture is on: nothing is clipped, hooked or swallowed.'] }
           : { active: true, cursorClipped: mode === 'mouse', keyboardHooked: mode !== 'mouse', mouseSwallowed: mode === 'mouse', warnings: [] },

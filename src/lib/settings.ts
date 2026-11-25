@@ -4,7 +4,6 @@
 import { useSyncExternalStore } from 'react';
 
 export interface Settings {
-  escHoldMs: number;
   comboHoldMs: number;
   /** release->press gap under this many ms counts as switch chatter */
   chatterMs: number;
@@ -19,7 +18,6 @@ export interface Settings {
 }
 
 export const defaults: Settings = {
-  escHoldMs: 1000,
   comboHoldMs: 1500,
   chatterMs: 30,
   safeMode: false,

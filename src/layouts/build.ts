@@ -2,7 +2,7 @@
 // keyboard layouts as data. a layout is rows of keys in key units (1u = a standard key).
 // to add one: add a size to `Size`, then describe it in `buildLayout` (see readme).
 
-export type Size = 'full' | 'tkl' | '75' | '65' | '60';
+export type Size = 'full' | 'tkl' | '75' | '65' | '60' | 'macbook';
 export type Variant = 'ansi' | 'iso';
 
 export interface KeyDef {
@@ -32,6 +32,7 @@ export const SIZES: { id: Size; name: string }[] = [
   { id: '75', name: '75%' },
   { id: '65', name: '65%' },
   { id: '60', name: '60%' },
+  { id: 'macbook', name: 'macbook' },
 ];
 
 export interface Rect {
@@ -82,8 +83,39 @@ const HOME = ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'K
 const BOTTOM = ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM', 'Comma', 'Period', 'Slash'];
 const F = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => `F${a + i}`);
 
+/** a macbook's built-in board: half-height function row, fn bottom left, inverted-t arrows */
+function macbook(keys: KeyDef[], iso: boolean): void {
+  const half = (r: Row, codes: string[], w = 1) => codes.forEach((c) => r.k(c, w, 0.5));
+  // the touch id button at the end of the function row sends no key
+  half(new Row(0, keys).k('Escape', 1.5, 0.5), F(1, 12));
+  const y = 0.5;
+  new Row(y, keys).k('Backquote').many(DIGITS).many(['Minus', 'Equal']).k('Backspace', 1.5);
+  const tab = new Row(y + 1, keys).k('Tab', 1.5).many(TOP).many(['BracketLeft', 'BracketRight']);
+  if (iso) tab.k('Enter', 1, 2, 'isoEnter');
+  else tab.k('Backslash');
+  const home = new Row(y + 2, keys).k('CapsLock', 1.75).many(HOME).many(['Semicolon', 'Quote']);
+  if (iso) home.k('Backslash');
+  else home.k('Enter', 1.75);
+  const shift = new Row(y + 3, keys);
+  if (iso) shift.k('ShiftLeft', 1.25).k('IntlBackslash');
+  else shift.k('ShiftLeft', 2.25);
+  shift.many(BOTTOM).k('ShiftRight', 2.25);
+  const bottom = new Row(y + 4, keys).many(['Fn', 'ControlLeft', 'AltLeft']).k('MetaLeft', 1.25).k('Space', 5).k('MetaRight', 1.25).k('AltRight');
+  const x = bottom.x;
+  keys.push(
+    { code: 'ArrowLeft', x, y: y + 4.5, w: 1, h: 0.5 },
+    { code: 'ArrowUp', x: x + 1, y: y + 4, w: 1, h: 0.5 },
+    { code: 'ArrowDown', x: x + 1, y: y + 4.5, w: 1, h: 0.5 },
+    { code: 'ArrowRight', x: x + 2, y: y + 4.5, w: 1, h: 0.5 },
+  );
+}
+
 export function buildLayout(size: Size, variant: Variant): Layout {
   const keys: KeyDef[] = [];
+  if (size === 'macbook') {
+    macbook(keys, variant === 'iso');
+    return finish(keys, size, variant);
+  }
   const iso = variant === 'iso';
   const hasF = size === 'full' || size === 'tkl' || size === '75';
   const compact = size === '75' || size === '65'; // 16u wide with a right-hand column
@@ -161,6 +193,10 @@ export function buildLayout(size: Size, variant: Variant): Layout {
     row(4).k('Numpad0', 2).k('NumpadDecimal');
   }
 
+  return finish(keys, size, variant);
+}
+
+function finish(keys: KeyDef[], size: Size, variant: Variant): Layout {
   const w = Math.max(...keys.map((k) => k.x + k.w));
   const h = Math.max(...keys.map((k) => k.y + k.h));
   const sizeName = SIZES.find((s) => s.id === size)!.name;

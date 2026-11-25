@@ -6,17 +6,32 @@ import { Kbd } from '../components/Kbd';
 import { Stamp } from '../components/Stamp';
 import { backendLabel, kindLabel, vidpid } from '../lib/format';
 import { endMessages } from '../lib/messages';
+import { exitComboKeys, keyboardLockText } from '../lib/osKeys';
 import { startSession } from '../lib/session';
 import { useSettings } from '../lib/settings';
 import { selectedDevice, useStore } from '../lib/store';
 import { deviceTitle, usePick } from '../models/pick';
 import type { DeviceInfo } from '../lib/types';
 
+function Combo({ keys }: { keys: string[] }) {
+  return (
+    <>
+      {keys.map((k, i) => (
+        <span key={k}>
+          {i > 0 && ' + '}
+          <Kbd>{k}</Kbd>
+        </span>
+      ))}
+    </>
+  );
+}
+
 function Rules({ dev }: { dev: DeviceInfo }) {
   const s = useSettings();
   const flag = useStore((st) => st.info?.noCapture);
+  const os = useStore((st) => st.info?.os);
+  const lock = keyboardLockText(os);
   const noCapture = flag || s.safeMode;
-  const esc = (s.escHoldMs / 1000).toString();
   const combo = (s.comboHoldMs / 1000).toString();
   return (
     <div className="callout">
@@ -26,12 +41,12 @@ function Rules({ dev }: { dev: DeviceInfo }) {
       ) : dev.viewer === 'mouse' ? (
         <p>
           the mouse is fully captured: the cursor is locked to this window and hidden, clicks and wheel never reach other apps, and there is no exit button.
-          hold <Kbd>esc</Kbd> for {esc}s to leave.
+          press <Kbd>esc</Kbd> on a keyboard to leave.
         </p>
       ) : dev.viewer === 'keyboard' ? (
         <p>
-          shortcuts are blocked so they register as test keys: esc, alt+f4, alt+tab, the win key and the rest. leave with the exit button, or hold{' '}
-          <Kbd>ctrl</Kbd> + <Kbd>alt</Kbd> + <Kbd>shift</Kbd> + <Kbd>backspace</Kbd> for {combo}s from any keyboard. ctrl+alt+del cannot be blocked and is shown as reserved.
+          shortcuts are blocked so they register as test keys: {lock.blocked}. leave with the exit button, or hold{' '}
+          <Combo keys={exitComboKeys(os)} /> for {combo}s from any keyboard. {lock.reserved}
         </p>
       ) : (
         <p>keyboard shortcuts are blocked during this test, and controller buttons never exit. the only way out is the exit button, with the mouse.</p>

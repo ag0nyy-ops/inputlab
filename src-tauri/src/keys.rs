@@ -42,6 +42,58 @@ pub const KEYS: &[(&str, u16, u16)] = &[
     ("Pause", 0xE11D, 119),
 ];
 
+/// no macos virtual keycode for this key (apple keyboards have no such key)
+pub const NO_VK: u16 = 0xFFFF;
+
+/// (dom code, usb hid keyboard-page usage, macos virtual keycode `kVK_*`). iokit reports
+/// hid usages, the layout api (UCKeyTranslate) wants virtual keycodes.
+pub const MAC_KEYS: &[(&str, u16, u16)] = &[
+    ("KeyA", 0x04, 0x00), ("KeyB", 0x05, 0x0B), ("KeyC", 0x06, 0x08), ("KeyD", 0x07, 0x02),
+    ("KeyE", 0x08, 0x0E), ("KeyF", 0x09, 0x03), ("KeyG", 0x0A, 0x05), ("KeyH", 0x0B, 0x04),
+    ("KeyI", 0x0C, 0x22), ("KeyJ", 0x0D, 0x26), ("KeyK", 0x0E, 0x28), ("KeyL", 0x0F, 0x25),
+    ("KeyM", 0x10, 0x2E), ("KeyN", 0x11, 0x2D), ("KeyO", 0x12, 0x1F), ("KeyP", 0x13, 0x23),
+    ("KeyQ", 0x14, 0x0C), ("KeyR", 0x15, 0x0F), ("KeyS", 0x16, 0x01), ("KeyT", 0x17, 0x11),
+    ("KeyU", 0x18, 0x20), ("KeyV", 0x19, 0x09), ("KeyW", 0x1A, 0x0D), ("KeyX", 0x1B, 0x07),
+    ("KeyY", 0x1C, 0x10), ("KeyZ", 0x1D, 0x06),
+    ("Digit1", 0x1E, 0x12), ("Digit2", 0x1F, 0x13), ("Digit3", 0x20, 0x14), ("Digit4", 0x21, 0x15),
+    ("Digit5", 0x22, 0x17), ("Digit6", 0x23, 0x16), ("Digit7", 0x24, 0x1A), ("Digit8", 0x25, 0x1C),
+    ("Digit9", 0x26, 0x19), ("Digit0", 0x27, 0x1D),
+    ("Enter", 0x28, 0x24), ("Escape", 0x29, 0x35), ("Backspace", 0x2A, 0x33), ("Tab", 0x2B, 0x30),
+    ("Space", 0x2C, 0x31), ("Minus", 0x2D, 0x1B), ("Equal", 0x2E, 0x18), ("BracketLeft", 0x2F, 0x21),
+    ("BracketRight", 0x30, 0x1E), ("Backslash", 0x31, 0x2A), ("Semicolon", 0x33, 0x29), ("Quote", 0x34, 0x27),
+    ("Backquote", 0x35, 0x32), ("Comma", 0x36, 0x2B), ("Period", 0x37, 0x2F), ("Slash", 0x38, 0x2C),
+    ("CapsLock", 0x39, 0x39),
+    ("F1", 0x3A, 0x7A), ("F2", 0x3B, 0x78), ("F3", 0x3C, 0x63), ("F4", 0x3D, 0x76), ("F5", 0x3E, 0x60),
+    ("F6", 0x3F, 0x61), ("F7", 0x40, 0x62), ("F8", 0x41, 0x64), ("F9", 0x42, 0x65), ("F10", 0x43, 0x6D),
+    ("F11", 0x44, 0x67), ("F12", 0x45, 0x6F),
+    ("PrintScreen", 0x46, NO_VK), ("ScrollLock", 0x47, NO_VK), ("Pause", 0x48, NO_VK),
+    // apple calls insert "help"
+    ("Insert", 0x49, 0x72), ("Home", 0x4A, 0x73), ("PageUp", 0x4B, 0x74), ("Delete", 0x4C, 0x75),
+    ("End", 0x4D, 0x77), ("PageDown", 0x4E, 0x79),
+    ("ArrowRight", 0x4F, 0x7C), ("ArrowLeft", 0x50, 0x7B), ("ArrowDown", 0x51, 0x7D), ("ArrowUp", 0x52, 0x7E),
+    // the "clear" key on apple keypads sits where num lock is
+    ("NumLock", 0x53, 0x47), ("NumpadDivide", 0x54, 0x4B), ("NumpadMultiply", 0x55, 0x43),
+    ("NumpadSubtract", 0x56, 0x4E), ("NumpadAdd", 0x57, 0x45), ("NumpadEnter", 0x58, 0x4C),
+    ("Numpad1", 0x59, 0x53), ("Numpad2", 0x5A, 0x54), ("Numpad3", 0x5B, 0x55), ("Numpad4", 0x5C, 0x56),
+    ("Numpad5", 0x5D, 0x57), ("Numpad6", 0x5E, 0x58), ("Numpad7", 0x5F, 0x59), ("Numpad8", 0x60, 0x5B),
+    ("Numpad9", 0x61, 0x5C), ("Numpad0", 0x62, 0x52), ("NumpadDecimal", 0x63, 0x41),
+    // iso section key (left of z on iso boards)
+    ("IntlBackslash", 0x64, 0x0A), ("ContextMenu", 0x65, 0x6E),
+    ("ControlLeft", 0xE0, 0x3B), ("ShiftLeft", 0xE1, 0x38), ("AltLeft", 0xE2, 0x3A), ("MetaLeft", 0xE3, 0x37),
+    ("ControlRight", 0xE4, 0x3E), ("ShiftRight", 0xE5, 0x3C), ("AltRight", 0xE6, 0x3D), ("MetaRight", 0xE7, 0x36),
+];
+
+/// apple's fn key is not on the keyboard page: it is usage 3 on apple's top case page
+/// (0xff), or on the apple keyboard page (0xff01) on newer boards. mac only, so it is not
+/// in the shared table (it has no windows scancode).
+pub fn apple_fn(page: u32, usage: u32) -> bool {
+    matches!((page, usage), (0xFF, 0x03) | (0xFF01, 0x03))
+}
+
+pub fn from_hid_usage(usage: u32) -> Option<&'static str> {
+    MAC_KEYS.iter().find(|k| k.1 as u32 == usage).map(|k| k.0)
+}
+
 pub fn from_set1(scan: u16) -> Option<&'static str> {
     KEYS.iter().find(|k| k.1 == scan).map(|k| k.0)
 }
@@ -99,5 +151,44 @@ mod tests {
         for k in ["ControlLeft", "AltLeft", "ShiftLeft", "Backspace", "Escape"] {
             assert!(to_set1(k).is_some());
         }
+    }
+
+    #[test]
+    fn mac_table_is_consistent() {
+        let mut names = HashSet::new();
+        let mut usages = HashSet::new();
+        let mut vks = HashSet::new();
+        for (n, u, vk) in MAC_KEYS {
+            assert!(names.insert(*n), "dup name {n}");
+            assert!(usages.insert(*u), "dup hid usage {u:#x} ({n})");
+            if *vk != NO_VK {
+                assert!(vks.insert(*vk), "dup mac keycode {vk:#x} ({n})");
+            }
+            assert!(to_set1(n).is_some(), "{n} is not in the shared key table");
+        }
+        // every key the shared table knows can be read on a mac
+        for (n, _, _) in KEYS {
+            assert!(names.contains(n), "{n} has no hid usage");
+        }
+    }
+
+    #[test]
+    fn hid_usages_map_to_dom_codes() {
+        assert_eq!(from_hid_usage(0x04), Some("KeyA"));
+        assert_eq!(from_hid_usage(0x2A), Some("Backspace"));
+        assert_eq!(from_hid_usage(0x4C), Some("Delete"));
+        assert_eq!(from_hid_usage(0xE2), Some("AltLeft"));
+        assert_eq!(from_hid_usage(0xE3), Some("MetaLeft"));
+        // error-rollover and out-of-range usages are not keys
+        assert_eq!(from_hid_usage(0x01), None);
+        assert_eq!(from_hid_usage(0xFFFF_FFFF), None);
+    }
+
+    #[test]
+    fn apple_fn_is_found_on_either_apple_page() {
+        assert!(apple_fn(0xFF, 0x03));
+        assert!(apple_fn(0xFF01, 0x03));
+        assert!(!apple_fn(0x07, 0x03));
+        assert!(!apple_fn(0xFF, 0x04));
     }
 }

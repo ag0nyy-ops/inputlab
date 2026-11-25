@@ -118,7 +118,6 @@ export interface Frame {
 }
 
 export interface SessionSettings {
-  escHoldMs: number;
   comboHoldMs: number;
   chatterMs: number;
   disableCapture: boolean;
