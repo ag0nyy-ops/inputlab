@@ -87,6 +87,7 @@ const TAP_HID: u32 = 0; // kCGHIDEventTap
 const TAP_SESSION: u32 = 1; // kCGSessionEventTap
 const TAP_HEAD: u32 = 0; // kCGHeadInsertEventTap
 const TAP_ACTIVE: u32 = 0; // kCGEventTapOptionDefault (may swallow)
+const TAP_LISTEN: u32 = 1; // kCGEventTapOptionListenOnly (input monitoring is enough)
 const TAP_DISABLED_TIMEOUT: u32 = 0xFFFF_FFFE;
 const TAP_DISABLED_USER: u32 = 0xFFFF_FFFF;
 
@@ -473,6 +474,8 @@ static MODE: AtomicU8 = AtomicU8::new(MODE_OFF);
 static TAP: AtomicUsize = AtomicUsize::new(0);
 static TAP_LOOP: AtomicUsize = AtomicUsize::new(0);
 static TAP_LOOP_STARTED: AtomicBool = AtomicBool::new(false);
+/// macos only allowed a listen-only tap: events are seen but nothing can be blocked
+static TAP_LISTEN_ONLY: AtomicBool = AtomicBool::new(false);
 static CURSOR_FROZEN: AtomicBool = AtomicBool::new(false);
 static CURSOR_HIDDEN: AtomicBool = AtomicBool::new(false);
 static AX_PROMPTED: AtomicBool = AtomicBool::new(false);
@@ -569,7 +572,7 @@ extern "C" fn on_tap(_proxy: *mut c_void, ty: u32, event: *mut c_void, _info: *m
         MODE_MOUSE => ty < 64 && MOUSE_EVENTS & bit(ty) != 0,
         _ => false,
     };
-    if swallow {
+    if swallow && !TAP_LISTEN_ONLY.load(Relaxed) {
         SWALLOWED.fetch_add(1, Relaxed);
         ptr::null_mut()
     } else {
@@ -624,18 +627,24 @@ fn ensure_tap() -> Result<CFMachPortRef, String> {
     if t != 0 {
         return Ok(t as CFMachPortRef);
     }
-    if !accessibility_trusted(true) {
-        return Err("turn on inputlab in system settings > privacy & security > accessibility so it can block shortcuts during a test.".into());
-    }
+    // asks for accessibility where macos still has that switch. the tap is tried either way:
+    // a listen-only tap needs just input monitoring and still sees right clicks and scrolls.
+    let trusted = accessibility_trusted(true);
     let rl = tap_loop().ok_or("could not start the event tap thread")?;
     unsafe {
         let mask = KEY_EVENTS | MOUSE_EVENTS;
-        let mut tap = CGEventTapCreate(TAP_HID, TAP_HEAD, TAP_ACTIVE, mask, on_tap, ptr::null_mut());
+        let create = |at, opt| CGEventTapCreate(at, TAP_HEAD, opt, mask, on_tap, ptr::null_mut());
+        let mut tap = create(TAP_HID, TAP_ACTIVE);
         if tap.is_null() {
-            tap = CGEventTapCreate(TAP_SESSION, TAP_HEAD, TAP_ACTIVE, mask, on_tap, ptr::null_mut());
+            tap = create(TAP_SESSION, TAP_ACTIVE);
         }
         if tap.is_null() {
-            return Err("macos refused the event tap. check accessibility for inputlab, then reopen it.".into());
+            tap = create(TAP_HID, TAP_LISTEN);
+            TAP_LISTEN_ONLY.store(!tap.is_null(), SeqCst);
+        }
+        hid_log(|| format!("event tap: created {}, listen only {}, accessibility {trusted}", !tap.is_null(), TAP_LISTEN_ONLY.load(SeqCst)));
+        if tap.is_null() {
+            return Err("macos refused the event tap. check input monitoring (and accessibility, if listed) for inputlab, then reopen it.".into());
         }
         let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0);
         if src.is_null() {
@@ -741,7 +750,7 @@ impl Platform for MacPlatform {
         }
         let keys_readable = listen_access() == HID_ACCESS_GRANTED;
         if spec.mode == CaptureMode::Mouse && !keys_readable {
-            // esc-hold is the only way out of a mouse test: never arm it blind
+            // esc is the only way out of a mouse test: never arm it blind
             rep.warnings.push("keyboards are unreadable (input monitoring is off), so the mouse is left free: pressing esc could not end the test.".into());
             return Ok(rep);
         }
@@ -752,7 +761,9 @@ impl Platform for MacPlatform {
             Ok(tap) => {
                 MODE.store(if spec.mode == CaptureMode::Mouse { MODE_MOUSE } else { MODE_KEYS }, SeqCst);
                 unsafe { CGEventTapEnable(tap, true) };
-                if spec.mode == CaptureMode::Mouse {
+                if TAP_LISTEN_ONLY.load(SeqCst) {
+                    rep.warnings.push("macos only lets inputlab listen, not block: shortcuts, clicks and the function row (brightness, volume) still act during a test. right clicks and scrolls are still read.".into());
+                } else if spec.mode == CaptureMode::Mouse {
                     rep.mouse_swallowed = true;
                 } else {
                     rep.keyboard_hooked = true;
@@ -760,6 +771,7 @@ impl Platform for MacPlatform {
             }
             Err(e) => rep.warnings.push(e),
         }
+        hid_log(|| format!("capture {:?}: tap armed {}, accessibility {}, warnings {:?}", spec.mode, MODE.load(SeqCst) != MODE_OFF, accessibility_trusted(false), rep.warnings));
         if spec.mode == CaptureMode::Keyboard && !keys_readable {
             rep.warnings.push("keyboards are unreadable (input monitoring is off): only the exit button can end this test.".into());
         }
@@ -768,6 +780,7 @@ impl Platform for MacPlatform {
     }
 
     fn end_capture(&self) {
+        hid_log(|| format!("capture end: tap calls {}, swallowed {}, revived {}", TAP_CALLS.load(Relaxed), SWALLOWED.load(Relaxed), REVIVED.load(Relaxed)));
         emergency_release();
     }
 
