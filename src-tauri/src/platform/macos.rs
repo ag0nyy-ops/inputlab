@@ -21,7 +21,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use core_foundation::array::CFArray;
-use core_foundation::base::TCFType;
+use core_foundation::base::{CFType, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::number::CFNumber;
@@ -75,6 +75,7 @@ extern "C" {
     fn IOHIDElementGetDevice(element: IOHIDElementRef) -> IOHIDDeviceRef;
     fn IOHIDElementIsRelative(element: IOHIDElementRef) -> u8;
     fn IOHIDDeviceGetService(device: IOHIDDeviceRef) -> u32;
+    fn IOHIDDeviceGetProperty(device: IOHIDDeviceRef, key: CFStringRef) -> *const c_void;
     fn IORegistryEntryGetRegistryEntryID(entry: u32, id: *mut u64) -> i32;
     fn IOHIDCheckAccess(request: u32) -> u32;
     fn IOHIDRequestAccess(request: u32) -> bool;
@@ -187,6 +188,8 @@ struct HidState {
     down: HashSet<(u64, u32)>,
     /// motion from the report being assembled: src -> (dx, dy, ts)
     pending: HashMap<u64, (i32, i32, u64)>,
+    /// (src, page << 16 | usage, nonzero) already written to the debug log
+    logged: HashSet<(u64, u32, bool)>,
 }
 
 thread_local! {
@@ -230,8 +233,40 @@ pub(crate) fn src_from_path(path: &str) -> u64 {
     h.finish() | 1 << 63
 }
 
+// ---------------------------------------------------------------- debug log
+
+/// INPUTLAB_HID_LOG=<file> appends every device iokit matches and the first zero and nonzero
+/// value of each (device, page, usage) it sends, to see what a device really reports. off when unset.
+fn hid_log(line: impl FnOnce() -> String) {
+    static FILE: OnceLock<Option<std::sync::Mutex<std::fs::File>>> = OnceLock::new();
+    let f = FILE.get_or_init(|| {
+        let path = std::env::var_os("INPUTLAB_HID_LOG")?;
+        std::fs::OpenOptions::new().create(true).append(true).open(path).ok().map(std::sync::Mutex::new)
+    });
+    if let Some(Ok(mut f)) = f.as_ref().map(|m| m.lock()) {
+        use std::io::Write;
+        let _ = writeln!(f, "{} {}", crate::timing::now_ns() / 1_000_000, line());
+    }
+}
+
+fn hid_log_on() -> bool {
+    std::env::var_os("INPUTLAB_HID_LOG").is_some()
+}
+
+fn device_desc(dev: IOHIDDeviceRef) -> String {
+    let prop = |k: &'static str| unsafe {
+        let v = IOHIDDeviceGetProperty(dev, CFString::from_static_string(k).as_concrete_TypeRef());
+        (!v.is_null()).then(|| CFType::wrap_under_get_rule(v as _))
+    };
+    let name = prop("Product").and_then(|v| v.downcast::<CFString>()).map(|s| s.to_string()).unwrap_or_default();
+    let num = |k| prop(k).and_then(|v| v.downcast::<CFNumber>()).and_then(|n| n.to_i64()).unwrap_or(-1);
+    format!("{name:?} primary {:#x}/{:#x} transport {:?}", num("PrimaryUsagePage"), num("PrimaryUsage"),
+        prop("Transport").and_then(|v| v.downcast::<CFString>()).map(|s| s.to_string()).unwrap_or_default())
+}
+
 extern "C" fn on_device_added(_ctx: *mut c_void, _res: IOReturn, _sender: *mut c_void, dev: IOHIDDeviceRef) {
     let id = registry_id(dev);
+    hid_log(|| format!("added src {id:#x} {}", device_desc(dev)));
     STATE.with(|s| {
         if let Ok(mut s) = s.try_borrow_mut() {
             s.ids.insert(dev as usize, id);
@@ -306,6 +341,10 @@ extern "C" fn on_value(_ctx: *mut c_void, _res: IOReturn, _sender: *mut c_void, 
             }
         };
         let held = (src, page << 16 | (usage & 0xFFFF));
+        if hid_log_on() && s.logged.insert((held.0, held.1, v != 0)) {
+            let rel = unsafe { IOHIDElementIsRelative(el) } != 0;
+            hid_log(|| format!("value src {src:#x} page {page:#x} usage {usage:#x} relative {rel} v {v}"));
+        }
 
         match (page, usage) {
             // keyboard page. 0x01..0x03 are rollover/error codes, not keys
@@ -383,6 +422,7 @@ fn hid_thread() {
         // kIOHIDOptionsTypeNone: shared, never seize. denied input monitoring shows up here
         // as not-permitted, but mice still open.
         OPEN_RESULT.store(IOHIDManagerOpen(mgr, 0), SeqCst);
+        hid_log(|| format!("open {:#x} listen access {}", OPEN_RESULT.load(SeqCst), IOHIDCheckAccess(HID_REQUEST_LISTEN)));
         // the manager and its callbacks live as long as the process
         CFRunLoopRun();
     }
