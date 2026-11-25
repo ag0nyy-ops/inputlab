@@ -99,6 +99,7 @@ extern "C" {
     fn CGMainDisplayID() -> u32;
     fn CGDisplayHideCursor(display: u32) -> i32;
     fn CGDisplayShowCursor(display: u32) -> i32;
+    fn CGEventGetIntegerValueField(event: *mut c_void, field: u32) -> i64;
 }
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -253,20 +254,29 @@ fn hid_log_on() -> bool {
     std::env::var_os("INPUTLAB_HID_LOG").is_some()
 }
 
-fn device_desc(dev: IOHIDDeviceRef) -> String {
-    let prop = |k: &'static str| unsafe {
-        let v = IOHIDDeviceGetProperty(dev, CFString::from_static_string(k).as_concrete_TypeRef());
+fn dev_prop(dev: IOHIDDeviceRef, key: &'static str) -> Option<CFType> {
+    unsafe {
+        let v = IOHIDDeviceGetProperty(dev, CFString::from_static_string(key).as_concrete_TypeRef());
         (!v.is_null()).then(|| CFType::wrap_under_get_rule(v as _))
-    };
-    let name = prop("Product").and_then(|v| v.downcast::<CFString>()).map(|s| s.to_string()).unwrap_or_default();
-    let num = |k| prop(k).and_then(|v| v.downcast::<CFNumber>()).and_then(|n| n.to_i64()).unwrap_or(-1);
-    format!("{name:?} primary {:#x}/{:#x} transport {:?}", num("PrimaryUsagePage"), num("PrimaryUsage"),
-        prop("Transport").and_then(|v| v.downcast::<CFString>()).map(|s| s.to_string()).unwrap_or_default())
+    }
+}
+fn dev_str(dev: IOHIDDeviceRef, key: &'static str) -> String {
+    dev_prop(dev, key).and_then(|v| v.downcast::<CFString>()).map(|s| s.to_string()).unwrap_or_default()
+}
+fn dev_num(dev: IOHIDDeviceRef, key: &'static str) -> i64 {
+    dev_prop(dev, key).and_then(|v| v.downcast::<CFNumber>()).and_then(|n| n.to_i64()).unwrap_or(-1)
+}
+
+fn device_desc(dev: IOHIDDeviceRef) -> String {
+    format!("{:?} primary {:#x}/{:#x} transport {:?}", dev_str(dev, "Product"), dev_num(dev, "PrimaryUsagePage"), dev_num(dev, "PrimaryUsage"), dev_str(dev, "Transport"))
 }
 
 extern "C" fn on_device_added(_ctx: *mut c_void, _res: IOReturn, _sender: *mut c_void, dev: IOHIDDeviceRef) {
     let id = registry_id(dev);
     hid_log(|| format!("added src {id:#x} {}", device_desc(dev)));
+    if dev_num(dev, "PrimaryUsage") == 0x02 && dev_str(dev, "Product").to_lowercase().contains("trackpad") {
+        TRACKPAD_SRC.store(id, SeqCst);
+    }
     STATE.with(|s| {
         if let Ok(mut s) = s.try_borrow_mut() {
             s.ids.insert(dev as usize, id);
@@ -279,6 +289,7 @@ extern "C" fn on_device_removed(_ctx: *mut c_void, _res: IOReturn, _sender: *mut
     STATE.with(|s| {
         if let Ok(mut s) = s.try_borrow_mut() {
             if let Some(id) = s.ids.remove(&(dev as usize)) {
+                let _ = TRACKPAD_SRC.compare_exchange(id, 0, SeqCst, SeqCst);
                 s.down.retain(|(src, _)| *src != id);
                 s.pending.remove(&id);
             }
@@ -365,7 +376,13 @@ extern "C" fn on_value(_ctx: *mut c_void, _res: IOReturn, _sender: *mut c_void, 
             }
             // buttons
             (0x09, 1..=255) => {
+                // a trackpad reports every physical click as button 1, even a two-finger (right)
+                // click. while a mouse test is armed its buttons come from the tap instead.
+                if src == TRACKPAD_SRC.load(Relaxed) && MODE.load(Relaxed) == MODE_MOUSE {
+                    return;
+                }
                 let down = v != 0;
+                stamp_hid(&LAST_HID_BUTTON[button_slot(usage as u8)]);
                 if edge(&mut s, held, down) {
                     emit(RawEvent::MouseButton { src, button: usage as u8, down, ts });
                 }
@@ -389,9 +406,15 @@ extern "C" fn on_value(_ctx: *mut c_void, _res: IOReturn, _sender: *mut c_void, 
                 }
             }
             // wheel, in 120ths of a notch like windows
-            (0x01, 0x38) if v != 0 => emit(RawEvent::Wheel { src, dx: 0, dy: (v as i32).saturating_mul(120), ts }),
+            (0x01, 0x38) if v != 0 => {
+                stamp_hid(&LAST_HID_WHEEL);
+                emit(RawEvent::Wheel { src, dx: 0, dy: (v as i32).saturating_mul(120), ts })
+            }
             // consumer page ac pan: the horizontal wheel
-            (0x0C, 0x238) if v != 0 => emit(RawEvent::Wheel { src, dx: (v as i32).saturating_mul(120), dy: 0, ts }),
+            (0x0C, 0x238) if v != 0 => {
+                stamp_hid(&LAST_HID_WHEEL);
+                emit(RawEvent::Wheel { src, dx: (v as i32).saturating_mul(120), dy: 0, ts })
+            }
             _ => {}
         }
     });
@@ -466,6 +489,67 @@ const MOUSE_EVENTS: u64 = bit(1) | bit(2) | bit(3) | bit(4) | bit(5) | bit(6) | 
     // trackpad gestures: rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
     | bit(18) | bit(19) | bit(20) | bit(29) | bit(30) | bit(31) | bit(32) | bit(34);
 
+// ---------------------------------------------------------------- system mouse events
+
+/// the built-in trackpad's src, 0 when there is none. its right click and two-finger scroll
+/// never show up over raw hid, only as system events.
+static TRACKPAD_SRC: AtomicU64 = AtomicU64::new(0);
+/// when a raw hid mouse last sent each button / the wheel, so the same click is not counted
+/// again when it comes back through the tap
+static LAST_HID_BUTTON: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+static LAST_HID_WHEEL: AtomicU64 = AtomicU64::new(0);
+// ponytail: matched by time, not by device (system events don't say which device sent them).
+// a raw hid mouse and the trackpad clicking within this window of each other lose one click.
+const HID_ECHO_NS: u64 = 100_000_000;
+
+// CGEventField numbers
+const FIELD_BUTTON_NUMBER: u32 = 3;
+const FIELD_SCROLL_FIXED_Y: u32 = 93;
+const FIELD_SCROLL_FIXED_X: u32 = 94;
+const FIELD_SCROLL_MOMENTUM: u32 = 123;
+
+fn button_slot(button: u8) -> usize {
+    (button.max(1) as usize - 1).min(7)
+}
+
+fn stamp_hid(t: &AtomicU64) {
+    t.store(crate::timing::now_ns(), Relaxed);
+}
+
+/// (button, down) for a mouse button event type; `other` is the button number field
+fn tap_button(ty: u32, other: i64) -> Option<(u8, bool)> {
+    match ty {
+        1 | 2 => Some((1, ty == 1)),
+        3 | 4 => Some((2, ty == 3)),
+        25 | 26 => Some(((other + 1).clamp(3, 255) as u8, ty == 25)),
+        _ => None,
+    }
+}
+
+/// a 16.16 fixed-point scroll of lines, in 120ths of a notch like the raw wheel
+fn scroll_120ths(fixed: i64) -> i32 {
+    (fixed * 120 / 65536).clamp(i32::MIN as i64, i32::MAX as i64) as i32
+}
+
+/// a mouse test is armed: turn system clicks and scrolls into input for the trackpad,
+/// unless a raw hid mouse already sent the same thing
+fn forward_mouse(ty: u32, event: *mut c_void) {
+    let now = crate::timing::now_ns();
+    let echo = |t: &AtomicU64| now.saturating_sub(t.load(Relaxed)) < HID_ECHO_NS;
+    let field = |f| unsafe { CGEventGetIntegerValueField(event, f) };
+    let src = TRACKPAD_SRC.load(Relaxed);
+    if let Some((button, down)) = tap_button(ty, if matches!(ty, 25 | 26) { field(FIELD_BUTTON_NUMBER) } else { 0 }) {
+        if !echo(&LAST_HID_BUTTON[button_slot(button)]) {
+            emit(RawEvent::MouseButton { src, button, down, ts: now });
+        }
+    } else if ty == 22 && field(FIELD_SCROLL_MOMENTUM) == 0 && !echo(&LAST_HID_WHEEL) {
+        let (dx, dy) = (scroll_120ths(field(FIELD_SCROLL_FIXED_X)), scroll_120ths(field(FIELD_SCROLL_FIXED_Y)));
+        if dx != 0 || dy != 0 {
+            emit(RawEvent::Wheel { src, dx, dy, ts: now });
+        }
+    }
+}
+
 extern "C" fn on_tap(_proxy: *mut c_void, ty: u32, event: *mut c_void, _info: *mut c_void) -> *mut c_void {
     if ty == TAP_DISABLED_TIMEOUT || ty == TAP_DISABLED_USER {
         // macos turns a slow tap off; turn it back on only while a test is armed
@@ -477,6 +561,9 @@ extern "C" fn on_tap(_proxy: *mut c_void, ty: u32, event: *mut c_void, _info: *m
         return event;
     }
     TAP_CALLS.fetch_add(1, Relaxed);
+    if MODE.load(Relaxed) == MODE_MOUSE && !event.is_null() {
+        forward_mouse(ty, event);
+    }
     let swallow = match MODE.load(Relaxed) {
         MODE_KEYS => ty < 64 && KEY_EVENTS & bit(ty) != 0,
         MODE_MOUSE => ty < 64 && MOUSE_EVENTS & bit(ty) != 0,
@@ -788,6 +875,35 @@ mod tests {
         let a = src_from_path("IOService:/AppleARMPE/foo");
         assert_eq!(a, src_from_path("IOService:/AppleARMPE/foo"));
         assert!(a >= 1 << 63);
+    }
+
+    #[test]
+    fn tap_buttons_map_left_right_and_others() {
+        assert_eq!(tap_button(1, 0), Some((1, true)));
+        assert_eq!(tap_button(2, 0), Some((1, false)));
+        assert_eq!(tap_button(3, 0), Some((2, true)));
+        assert_eq!(tap_button(4, 0), Some((2, false)));
+        // other mouse down with button number 2 (middle) is button 3
+        assert_eq!(tap_button(25, 2), Some((3, true)));
+        assert_eq!(tap_button(26, 4), Some((5, false)));
+        assert_eq!(tap_button(22, 0), None, "scroll is not a button");
+        assert_eq!(tap_button(5, 0), None, "motion is not a button");
+    }
+
+    #[test]
+    fn scroll_lines_become_120ths_of_a_notch() {
+        assert_eq!(scroll_120ths(65536), 120);
+        assert_eq!(scroll_120ths(-65536 * 3), -360);
+        assert_eq!(scroll_120ths(32768), 60);
+        assert_eq!(scroll_120ths(0), 0);
+    }
+
+    #[test]
+    fn button_slots_stay_in_range() {
+        assert_eq!(button_slot(0), 0);
+        assert_eq!(button_slot(1), 0);
+        assert_eq!(button_slot(2), 1);
+        assert_eq!(button_slot(255), 7);
     }
 
     #[test]
